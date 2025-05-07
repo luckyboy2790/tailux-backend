@@ -1,0 +1,29 @@
+# Node modules
+node_modules/
+
+# Env files (NEVER commit secrets!)
+.env
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Editor-specific
+.vscode/
+.idea/
+
+# Build artifacts
+dist/
+build/
+
+# Optional: test coverage
+coverage/
+
+# Optional: local database dumps or exports
+*.sql
+*.sqlite
