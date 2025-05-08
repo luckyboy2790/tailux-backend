@@ -17,11 +17,15 @@ const dashboardRoutes = require("./routes/dashboard.routes");
 const purchaseRoutes = require("./routes/purchase.routes");
 const companyRoutes = require("./routes/company.routes");
 const supplierRoutes = require("./routes/supplier.routes");
+const saleRoutes = require("./routes/sales.routes");
+const customerRoutes = require("./routes/customer.routes");
 
 app.use("/api/users", userRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/purchase", purchaseRoutes);
 app.use("/api/company", companyRoutes);
 app.use("/api/supplier", supplierRoutes);
+app.use("/api/sales", saleRoutes);
+app.use("/api/customer", customerRoutes);
 
 module.exports = app;
