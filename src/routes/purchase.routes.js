@@ -3,5 +3,6 @@ const router = express.Router();
 const purchaseController = require("../controllers/purchase.controller");
 
 router.get("/search", purchaseController.getPurchaseSearch);
+router.get("/search_pending", purchaseController.getPendingPurchaseSearch);
 
 module.exports = router;

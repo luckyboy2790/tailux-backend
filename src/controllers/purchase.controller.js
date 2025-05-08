@@ -8,3 +8,12 @@ exports.getPurchaseSearch = async (req, res) => {
     res.status(500).json({ error: "Server Error" });
   }
 };
+
+exports.getPendingPurchaseSearch = async (req, res) => {
+  try {
+    const purchases = await Purchase.searchPendingPurchases(req);
+    res.json(purchases);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};

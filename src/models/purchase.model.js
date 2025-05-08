@@ -232,3 +232,251 @@ exports.searchPurchases = async (filters) => {
     };
   }
 };
+
+exports.searchPendingPurchases = async (req) => {
+  try {
+    const {
+      company_id = "",
+      supplier_id = "",
+      keyword = "",
+      startDate = "",
+      endDate = "",
+      expiryStartDate = "",
+      expiryEndDate = "",
+      sort_by_date = "desc",
+      page = 1,
+      per_page = 15,
+    } = req.query;
+
+    // Base query
+    let query = `
+      SELECT
+        p.*,
+        s.name AS supplier_name,
+        s.company AS supplier_company,
+        s.email AS supplier_email,
+        s.phone_number AS supplier_phone,
+        s.address AS supplier_address,
+        s.city AS supplier_city,
+        s.note AS supplier_note,
+        st.name AS store_name,
+        c.name AS company_name,
+        u.username AS user_username,
+        u.first_name AS user_first_name,
+        u.last_name AS user_last_name,
+        u.email AS user_email,
+        u.phone_number AS user_phone,
+        u.role AS user_role,
+        u.status AS user_status,
+        u.picture AS user_picture,
+        COALESCE(SUM(pm.amount), 0) AS paid_amount,
+        COALESCE(SUM(ptr.amount), 0) AS returned_amount,
+        (p.grand_total - COALESCE(SUM(ptr.amount), 0)) AS total_amount
+      FROM purchases p
+      LEFT JOIN suppliers s ON p.supplier_id = s.id
+      LEFT JOIN stores st ON p.store_id = st.id
+      LEFT JOIN companies c ON p.company_id = c.id
+      LEFT JOIN users u ON p.user_id = u.id
+      LEFT JOIN payments pm ON pm.paymentable_id = p.id AND pm.paymentable_type = 'purchase'
+      LEFT JOIN preturns ptr ON ptr.purchase_id = p.id
+      WHERE p.status = 0
+    `;
+
+    // Add filters based on request parameters
+    const params = [];
+
+    if (company_id) {
+      query += ` AND p.company_id = ?`;
+      params.push(company_id);
+    }
+
+    if (supplier_id) {
+      query += ` AND p.supplier_id = ?`;
+      params.push(supplier_id);
+    }
+
+    if (keyword) {
+      query += ` AND (
+        p.reference_no LIKE ? OR
+        p.timestamp LIKE ? OR
+        p.grand_total LIKE ? OR
+        c.name LIKE ? OR
+        st.name LIKE ? OR
+        s.company LIKE ?
+      )`;
+      const keywordLike = `%${keyword}%`;
+      params.push(
+        keywordLike,
+        keywordLike,
+        keywordLike,
+        keywordLike,
+        keywordLike,
+        keywordLike
+      );
+    }
+
+    if (startDate && endDate) {
+      if (startDate === endDate) {
+        query += ` AND DATE(p.timestamp) = ?`;
+        params.push(startDate);
+      } else {
+        query += ` AND p.timestamp BETWEEN ? AND ?`;
+        params.push(startDate, endDate);
+      }
+    }
+
+    if (expiryStartDate && expiryEndDate) {
+      if (expiryStartDate === expiryEndDate) {
+        query += ` AND DATE(p.expiry_date) = ?`;
+        params.push(expiryStartDate);
+      } else {
+        query += ` AND p.expiry_date BETWEEN ? AND ?`;
+        params.push(expiryStartDate, expiryEndDate);
+      }
+    }
+
+    // Group by purchase id
+    query += ` GROUP BY p.id`;
+
+    // Add sorting
+    query += ` ORDER BY p.timestamp ${sort_by_date === "asc" ? "ASC" : "DESC"}`;
+
+    // Count total records for pagination
+    const countQuery = `SELECT COUNT(*) as total FROM (${query}) AS total_purchases`;
+    const [countResult] = await db.query(countQuery, params);
+    const total = countResult[0].total;
+    const totalPages = Math.ceil(total / per_page);
+
+    // Add pagination
+    const offset = (page - 1) * per_page;
+    query += ` LIMIT ? OFFSET ?`;
+    params.push(parseInt(per_page), offset);
+
+    // Execute main query
+    const [purchases] = await db.query(query, params);
+
+    // Get related data for each purchase
+    for (const purchase of purchases) {
+      // Get orders
+      const [orders] = await db.query(
+        `
+        SELECT o.*,
+          prod.name AS product_name,
+          prod.code AS product_code,
+          prod.unit AS product_unit,
+          prod.cost AS product_cost,
+          prod.price AS product_price,
+          prod.alert_quantity AS product_alert_quantity
+        FROM orders o
+        LEFT JOIN products prod ON o.product_id = prod.id
+        WHERE o.orderable_id = ? AND o.orderable_type = 'purchase'
+      `,
+        [purchase.id]
+      );
+
+      purchase.orders = orders.map((order) => ({
+        ...order,
+        product: {
+          id: order.product_id,
+          name: order.product_name,
+          code: order.product_code,
+          unit: order.product_unit,
+          cost: order.product_cost,
+          price: order.product_price,
+          alert_quantity: order.product_alert_quantity,
+        },
+      }));
+
+      // Get payments
+      const [payments] = await db.query(
+        `
+        SELECT * FROM payments
+        WHERE paymentable_id = ? AND paymentable_type = 'purchase'
+      `,
+        [purchase.id]
+      );
+      purchase.payments = payments;
+
+      // Get returns
+      const [preturns] = await db.query(
+        `
+        SELECT * FROM preturns
+        WHERE purchase_id = ?
+      `,
+        [purchase.id]
+      );
+      purchase.preturns = preturns;
+
+      // Get images
+      const [images] = await db.query(
+        `
+        SELECT *,
+          CONCAT('http://your-domain.com/storage', path) AS src,
+          'image' AS type
+        FROM images
+        WHERE imageable_id = ? AND imageable_type = 'purchase'
+      `,
+        [purchase.id]
+      );
+      purchase.images = images;
+
+      // Add nested objects for relationships
+      purchase.company = {
+        id: purchase.company_id,
+        name: purchase.company_name,
+      };
+
+      purchase.supplier = {
+        id: purchase.supplier_id,
+        name: purchase.supplier_name,
+        company: purchase.supplier_company,
+        email: purchase.supplier_email,
+        phone_number: purchase.supplier_phone,
+        address: purchase.supplier_address,
+        city: purchase.supplier_city,
+        note: purchase.supplier_note,
+      };
+
+      purchase.store = {
+        id: purchase.store_id,
+        name: purchase.store_name,
+        company: {
+          id: purchase.company_id,
+          name: purchase.company_name,
+        },
+      };
+
+      purchase.user = {
+        id: purchase.user_id,
+        username: purchase.user_username,
+        first_name: purchase.user_first_name,
+        last_name: purchase.user_last_name,
+        email: purchase.user_email,
+        phone_number: purchase.user_phone,
+        role: purchase.user_role,
+        status: purchase.user_status,
+        picture: purchase.user_picture,
+        name: `${purchase.user_first_name} ${purchase.user_last_name}`,
+        company: {
+          id: purchase.company_id,
+          name: purchase.company_name,
+        },
+      };
+    }
+
+    return {
+      status: "Success",
+      data: {
+        current_page: parseInt(page),
+        per_page: parseInt(per_page),
+        total: total,
+        total_pages: totalPages,
+        data: purchases,
+      },
+      message: null,
+    };
+  } catch (error) {
+    console.error("Error in searchPending:", error);
+    throw error;
+  }
+};
