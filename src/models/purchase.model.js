@@ -5,7 +5,6 @@ exports.searchPurchases = async (filters) => {
     const values = [];
     const filterConditions = [];
 
-    // Base condition
     filterConditions.push("p.status = 1");
 
     if (filters.company_id) {
@@ -46,7 +45,6 @@ exports.searchPurchases = async (filters) => {
       ? `WHERE ${filterConditions.join(" AND ")}`
       : "";
 
-    // Count query
     const countQuery = `
       SELECT COUNT(DISTINCT p.id) AS total
       FROM purchases p
@@ -57,12 +55,10 @@ exports.searchPurchases = async (filters) => {
       ${whereClause}
     `;
 
-    // Pagination
     const perPage = parseInt(filters.per_page) || 15;
     const page = parseInt(filters.page) || 1;
     const offset = (page - 1) * perPage;
 
-    // Main query to get purchases
     const purchaseQuery = `
       SELECT
         p.*,
@@ -105,19 +101,15 @@ exports.searchPurchases = async (filters) => {
       LIMIT ? OFFSET ?
     `;
 
-    // Add pagination values
     const purchaseValues = [...values, perPage, offset];
 
-    // Execute queries
     const [countResult] = await db.query(countQuery, values);
     const total = countResult[0]?.total || 0;
 
     const [purchaseRows] = await db.query(purchaseQuery, purchaseValues);
 
-    // Get additional data for each purchase
     const enriched = await Promise.all(
       purchaseRows.map(async (row) => {
-        // Get orders
         const [orders] = await db.query(
           `
         SELECT o.*,
@@ -134,7 +126,6 @@ exports.searchPurchases = async (filters) => {
           [row.id]
         );
 
-        // Get payments
         const [payments] = await db.query(
           `
         SELECT * FROM payments
@@ -143,7 +134,6 @@ exports.searchPurchases = async (filters) => {
           [row.id]
         );
 
-        // Get returns
         const [preturns] = await db.query(
           `
         SELECT * FROM preturns WHERE purchase_id = ?
@@ -151,7 +141,6 @@ exports.searchPurchases = async (filters) => {
           [row.id]
         );
 
-        // Get images
         const [images] = await db.query(
           `
         SELECT *,
