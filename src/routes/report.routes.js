@@ -19,5 +19,6 @@ router.get(
   reportController.getExpiredPurchasesReportSearch
 );
 router.get("/sales", reportController.getSalesReportSearch);
+router.get("/purchases", reportController.getPurchasesReportSearch);
 
 module.exports = router;

@@ -71,3 +71,12 @@ exports.getSalesReportSearch = async (req, res) => {
     res.status(500).json({ error: "Server Error" });
   }
 };
+
+exports.getPurchasesReportSearch = async (req, res) => {
+  try {
+    const storeData = await Report.getPurchasesReport(req);
+    res.json(storeData);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};

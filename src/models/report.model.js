@@ -1232,3 +1232,415 @@ exports.getSalesReport = async (req) => {
     };
   }
 };
+
+exports.getPurchasesReport = async (req) => {
+  try {
+    const {
+      company_id = "",
+      supplier_id = "",
+      user_id = "",
+      keyword = "",
+      startDate = "",
+      endDate = "",
+      sort_by_date = "desc",
+      page = 1,
+      per_page = 15,
+    } = req.query;
+
+    const offset = (page - 1) * per_page;
+    const values = [];
+    const filterConditions = ["p.status = 1"];
+
+    // Handle user role filtering (not implemented in this example)
+    // const auth_user = req.user;
+    // if (auth_user.role === 'user' || auth_user.role === 'secretary') {
+    //   filterConditions.push("p.company_id = ?");
+    //   values.push(auth_user.company_id);
+    // }
+
+    if (company_id) {
+      filterConditions.push("p.company_id = ?");
+      values.push(company_id);
+    }
+
+    if (supplier_id) {
+      filterConditions.push("p.supplier_id = ?");
+      values.push(supplier_id);
+    }
+
+    if (user_id) {
+      filterConditions.push("p.user_id = ?");
+      values.push(user_id);
+    }
+
+    if (keyword) {
+      const keywordLike = `%${keyword}%`;
+      filterConditions.push(`(
+        p.reference_no LIKE ? OR
+        p.grand_total LIKE ? OR
+        p.company_id IN (SELECT id FROM companies WHERE name LIKE ?) OR
+        p.store_id IN (SELECT id FROM stores WHERE name LIKE ?) OR
+        p.supplier_id IN (SELECT id FROM suppliers WHERE company LIKE ?) OR
+        p.timestamp LIKE ?
+      )`);
+      values.push(
+        keywordLike,
+        keywordLike,
+        keywordLike,
+        keywordLike,
+        keywordLike,
+        keywordLike
+      );
+    }
+
+    if (startDate && endDate) {
+      if (startDate === endDate) {
+        filterConditions.push("DATE(p.timestamp) = ?");
+        values.push(startDate);
+      } else {
+        filterConditions.push("p.timestamp BETWEEN ? AND ?");
+        values.push(startDate, endDate);
+      }
+    }
+
+    const whereClause =
+      filterConditions.length > 0
+        ? `WHERE ${filterConditions.join(" AND ")}`
+        : "";
+
+    // Count total records
+    const countQuery = `SELECT COUNT(*) AS total FROM purchases p ${whereClause}`;
+    const [countResult] = await db.query(countQuery, values);
+    const total = countResult[0]?.total || 0;
+
+    // Main query for purchases
+    const purchaseQuery = `
+      SELECT
+        p.*,
+        c.id AS company_id,
+        c.name AS company_name,
+        c.created_at AS company_created_at,
+        c.updated_at AS company_updated_at,
+        s.id AS supplier_id,
+        s.name AS supplier_name,
+        s.company AS supplier_company,
+        s.email AS supplier_email,
+        s.phone_number AS supplier_phone,
+        s.address AS supplier_address,
+        s.city AS supplier_city,
+        s.note AS supplier_note,
+        s.created_at AS supplier_created_at,
+        s.updated_at AS supplier_updated_at,
+        st.id AS store_id,
+        st.name AS store_name,
+        st.company_id AS store_company_id,
+        st.created_at AS store_created_at,
+        st.updated_at AS store_updated_at,
+        u.id AS user_id,
+        u.username AS user_username,
+        u.first_name AS user_first_name,
+        u.last_name AS user_last_name,
+        u.email AS user_email,
+        u.phone_number AS user_phone,
+        u.role AS user_role,
+        u.status AS user_status,
+        u.picture AS user_picture
+      FROM purchases p
+      LEFT JOIN companies c ON c.id = p.company_id
+      LEFT JOIN suppliers s ON s.id = p.supplier_id
+      LEFT JOIN stores st ON st.id = p.store_id
+      LEFT JOIN users u ON u.id = p.user_id
+      ${whereClause}
+      ORDER BY p.timestamp ${sort_by_date === "asc" ? "ASC" : "DESC"}
+      LIMIT ? OFFSET ?
+    `;
+
+    const purchaseValues = [...values, parseInt(per_page), offset];
+    const [purchaseRows] = await db.query(purchaseQuery, purchaseValues);
+    const purchaseIds = purchaseRows.map((row) => row.id);
+
+    if (purchaseIds.length === 0) {
+      return {
+        status: "Success",
+        data: {
+          current_page: parseInt(page),
+          data: [],
+          first_page_url: "",
+          from: 0,
+          last_page: 0,
+          last_page_url: "",
+          links: [],
+          next_page_url: null,
+          path: "",
+          per_page: parseInt(per_page),
+          prev_page_url: null,
+          to: 0,
+          total: 0,
+        },
+        message: null,
+      };
+    }
+
+    // Get orders for the purchases
+    const [orders] = await db.query(
+      `
+      SELECT
+        o.*,
+        o.orderable_id AS purchase_id,
+        pr.id AS product_id,
+        pr.name AS product_name,
+        pr.code AS product_code,
+        pr.unit AS product_unit,
+        pr.cost AS product_cost,
+        pr.price AS product_price,
+        pr.alert_quantity AS product_alert_quantity
+      FROM orders o
+      LEFT JOIN products pr ON pr.id = o.product_id
+      WHERE o.orderable_type = 'App\\\\Models\\\\Purchase'
+        AND o.orderable_id IN (${purchaseIds.map(() => "?").join(",")})
+    `,
+      purchaseIds
+    );
+
+    // Get payments for the purchases
+    const [payments] = await db.query(
+      `
+      SELECT
+        *,
+        paymentable_id AS purchase_id
+      FROM payments
+      WHERE paymentable_type = 'App\\\\Models\\\\Purchase'
+        AND paymentable_id IN (${purchaseIds.map(() => "?").join(",")})
+    `,
+      purchaseIds
+    );
+
+    // Get returns for the purchases
+    const [preturns] = await db.query(
+      `
+      SELECT
+        *,
+        purchase_id
+      FROM preturns
+      WHERE purchase_id IN (${purchaseIds.map(() => "?").join(",")})
+    `,
+      purchaseIds
+    );
+
+    // Get images for the purchases
+    const [images] = await db.query(
+      `
+      SELECT
+        *,
+        imageable_id AS purchase_id,
+        CONCAT('http://your-domain.com/storage', path) AS src,
+        'image' AS type
+      FROM images
+      WHERE imageable_type = 'App\\\\Models\\\\Purchase'
+        AND imageable_id IN (${purchaseIds.map(() => "?").join(",")})
+    `,
+      purchaseIds
+    );
+
+    // Helper function to map items by purchase_id
+    const mapById = (items, key = "purchase_id") => {
+      const map = {};
+      for (const item of items) {
+        const id = item[key];
+        if (!map[id]) map[id] = [];
+        map[id].push(item);
+      }
+      return map;
+    };
+
+    const orderMap = mapById(orders);
+    const paymentMap = mapById(payments);
+    const returnMap = mapById(preturns);
+    const imageMap = mapById(images);
+
+    // Enrich purchase data with related information
+    const enriched = purchaseRows.map((row) => {
+      const totalPaid = (paymentMap[row.id] || []).reduce(
+        (sum, p) => sum + parseFloat(p.amount),
+        0
+      );
+      const totalReturned = (returnMap[row.id] || []).reduce(
+        (sum, r) => sum + parseFloat(r.amount),
+        0
+      );
+
+      return {
+        id: row.id,
+        user_id: row.user_id,
+        timestamp: row.timestamp,
+        reference_no: row.reference_no,
+        store_id: row.store_id,
+        company_id: row.company_id,
+        supplier_id: row.supplier_id,
+        discount: row.discount,
+        discount_string: row.discount_string,
+        shipping: row.shipping,
+        shipping_string: row.shipping_string,
+        returns: row.returns,
+        grand_total: row.grand_total,
+        credit_days: row.credit_days,
+        expiry_date: row.expiry_date,
+        attachment: row.attachment,
+        note: row.note,
+        status: row.status,
+        order_id: row.order_id,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        total_amount: row.grand_total,
+        paid_amount: totalPaid,
+        returned_amount: totalReturned,
+        company: {
+          id: row.company_id,
+          name: row.company_name,
+          created_at: row.company_created_at,
+          updated_at: row.company_updated_at,
+        },
+        store: {
+          id: row.store_id,
+          name: row.store_name,
+          company_id: row.store_company_id,
+          created_at: row.store_created_at,
+          updated_at: row.store_updated_at,
+          company: {
+            id: row.company_id,
+            name: row.company_name,
+            created_at: row.company_created_at,
+            updated_at: row.company_updated_at,
+          },
+        },
+        supplier: {
+          id: row.supplier_id,
+          name: row.supplier_name,
+          company: row.supplier_company,
+          email: row.supplier_email,
+          phone_number: row.supplier_phone,
+          address: row.supplier_address,
+          city: row.supplier_city,
+          note: row.supplier_note,
+          created_at: row.supplier_created_at,
+          updated_at: row.supplier_updated_at,
+        },
+        orders: (orderMap[row.id] || []).map((order) => ({
+          id: order.id,
+          product_id: order.product_id,
+          cost: order.cost,
+          price: order.price,
+          quantity: order.quantity,
+          subtotal: order.subtotal,
+          expiry_date: order.expiry_date,
+          serial_no: order.serial_no,
+          orderable_id: order.orderable_id,
+          orderable_type: order.orderable_type,
+          pre_order_item_id: order.pre_order_item_id,
+          created_at: order.created_at,
+          updated_at: order.updated_at,
+          product: {
+            id: order.product_id,
+            name: order.product_name,
+            code: order.product_code,
+            unit: order.product_unit,
+            cost: order.product_cost,
+            price: order.product_price,
+            alert_quantity: order.product_alert_quantity,
+          },
+        })),
+        payments: paymentMap[row.id] || [],
+        preturns: returnMap[row.id] || [],
+        images: imageMap[row.id] || [],
+      };
+    });
+
+    // Calculate pagination metadata
+    const last_page = Math.ceil(total / per_page);
+    const baseUrl = `${req.protocol}://${req.get("host")}${req.baseUrl}${
+      req.path
+    }`;
+    const queryParams = new URLSearchParams(req.query);
+    queryParams.delete("page");
+
+    const first_page_url = `${baseUrl}?${queryParams.toString()}&page=1`;
+    const last_page_url = `${baseUrl}?${queryParams.toString()}&page=${last_page}`;
+    const next_page_url =
+      page < last_page
+        ? `${baseUrl}?${queryParams.toString()}&page=${parseInt(page) + 1}`
+        : null;
+    const prev_page_url =
+      page > 1
+        ? `${baseUrl}?${queryParams.toString()}&page=${parseInt(page) - 1}`
+        : null;
+
+    // Generate pagination links
+    const links = [
+      {
+        url: prev_page_url,
+        label: "&laquo; Anterior",
+        active: false,
+      },
+    ];
+
+    // Add page links (simplified version - in real app you might want to limit visible pages)
+    for (let i = 1; i <= Math.min(10, last_page); i++) {
+      links.push({
+        url: `${baseUrl}?${queryParams.toString()}&page=${i}`,
+        label: i.toString(),
+        active: i === parseInt(page),
+      });
+    }
+
+    if (last_page > 10) {
+      links.push({
+        url: null,
+        label: "...",
+        active: false,
+      });
+      links.push({
+        url: `${baseUrl}?${queryParams.toString()}&page=${last_page - 1}`,
+        label: (last_page - 1).toString(),
+        active: false,
+      });
+      links.push({
+        url: `${baseUrl}?${queryParams.toString()}&page=${last_page}`,
+        label: last_page.toString(),
+        active: false,
+      });
+    }
+
+    links.push({
+      url: next_page_url,
+      label: "Siguiente &raquo;",
+      active: false,
+    });
+
+    return {
+      status: "Success",
+      data: {
+        current_page: parseInt(page),
+        data: enriched,
+        first_page_url,
+        from: offset + 1,
+        last_page,
+        last_page_url,
+        links,
+        next_page_url,
+        path: baseUrl,
+        per_page: parseInt(per_page),
+        prev_page_url,
+        to: Math.min(offset + parseInt(per_page), total),
+        total,
+      },
+      message: null,
+    };
+  } catch (error) {
+    console.error("Error in purchasesReport:", error);
+    return {
+      status: "Error",
+      message: "Failed to fetch purchases report",
+      data: null,
+    };
+  }
+};
