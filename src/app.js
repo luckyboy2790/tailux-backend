@@ -21,6 +21,9 @@ const saleRoutes = require("./routes/sales.routes");
 const customerRoutes = require("./routes/customer.routes");
 const paymentRoutes = require("./routes/payment.routes");
 const productRoutes = require("./routes/product.routes");
+const preOrderRoutes = require("./routes/preorder.routes");
+const receivedOrderRoutes = require("./routes/receivedOrder.routes");
+const reportRoutes = require("./routes/report.routes");
 
 app.use("/api/users", userRoutes);
 app.use("/api/dashboard", dashboardRoutes);
@@ -31,5 +34,8 @@ app.use("/api/sales", saleRoutes);
 app.use("/api/customer", customerRoutes);
 app.use("/api/payment", paymentRoutes);
 app.use("/api/product", productRoutes);
+app.use("/api/purchase_order", preOrderRoutes);
+app.use("/api/recieved_order", receivedOrderRoutes);
+app.use("/api/report", reportRoutes);
 
 module.exports = app;
