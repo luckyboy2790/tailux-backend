@@ -2210,3 +2210,97 @@ exports.getCustomersReport = async (filters, user = null) => {
     };
   }
 };
+
+exports.getSuppliersReport = async (filters) => {
+  try {
+    const values = [];
+    const filterConditions = [];
+
+    // Keyword search
+    if (filters.keyword) {
+      const keyword = `%${filters.keyword}%`;
+      filterConditions.push(`(
+        s.name LIKE ? OR
+        s.company LIKE ? OR
+        s.phone_number LIKE ? OR
+        s.city LIKE ? OR
+        s.address LIKE ?
+      )`);
+      values.push(keyword, keyword, keyword, keyword, keyword);
+    }
+
+    const whereClause = filterConditions.length
+      ? `WHERE ${filterConditions.join(" AND ")}`
+      : "";
+
+    // Pagination
+    const perPage = parseInt(filters.per_page) || 15;
+    const page = parseInt(filters.page) || 1;
+    const offset = (page - 1) * perPage;
+
+    // Count total suppliers
+    const countQuery = `SELECT COUNT(*) AS total FROM suppliers s ${whereClause}`;
+    const [countResult] = await db.query(countQuery, values);
+    const total = countResult[0]?.total || 0;
+
+    // Get suppliers with pagination
+    const suppliersQuery = `
+      SELECT
+        s.*,
+        (SELECT COUNT(*) FROM purchases p WHERE p.supplier_id = s.id AND p.status = 1) AS total_purchases,
+        (
+          SELECT COALESCE(SUM(p.grand_total), 0) -
+          COALESCE((SELECT SUM(pr.amount) FROM preturns pr WHERE pr.purchase_id IN
+            (SELECT id FROM purchases WHERE supplier_id = s.id AND status = 1) AND pr.status = 1), 0)
+          FROM purchases p
+          WHERE p.supplier_id = s.id AND p.status = 1
+        ) AS total_amount,
+        (
+          SELECT COALESCE(SUM(py.amount), 0)
+          FROM payments py
+          WHERE py.paymentable_id IN
+            (SELECT id FROM purchases WHERE supplier_id = s.id AND status = 1)
+            AND py.paymentable_type = 'App\\\\Models\\\\Purchase'
+        ) AS paid_amount
+      FROM suppliers s
+      ${whereClause}
+      ORDER BY s.created_at DESC
+      LIMIT ? OFFSET ?
+    `;
+
+    const supplierValues = [...values, perPage, offset];
+    const [suppliers] = await db.query(suppliersQuery, supplierValues);
+
+    // Calculate pagination metadata
+    const totalPages = Math.ceil(total / perPage);
+    const baseUrl = `${process.env.APP_URL}/api/report/suppliers_report`;
+
+    const pagination = {
+      current_page: page,
+      data: suppliers,
+      first_page_url: `${baseUrl}?page=1`,
+      from: offset + 1,
+      last_page: totalPages,
+      last_page_url: `${baseUrl}?page=${totalPages}`,
+      next_page_url: page < totalPages ? `${baseUrl}?page=${page + 1}` : null,
+      path: baseUrl,
+      per_page: perPage,
+      prev_page_url: page > 1 ? `${baseUrl}?page=${page - 1}` : null,
+      to: Math.min(offset + perPage, total),
+      total: total,
+    };
+
+    return {
+      status: "Success",
+      data: pagination,
+      message: null,
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "Error",
+      message: "Failed to fetch suppliers report",
+      data: null,
+    };
+  }
+};
