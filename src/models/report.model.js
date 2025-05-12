@@ -2027,3 +2027,186 @@ exports.getPaymentsReport = async (filters) => {
     };
   }
 };
+
+exports.getCustomersReport = async (filters, user = null) => {
+  try {
+    const values = [];
+    const filterConditions = [];
+
+    if (filters.keyword) {
+      const keyword = filters.keyword;
+      filterConditions.push(`(
+        name LIKE ?
+        OR company LIKE ?
+        OR phone_number LIKE ?
+        OR city LIKE ?
+        OR address LIKE ?
+      )`);
+      const keywordLike = `%${keyword}%`;
+      values.push(
+        keywordLike,
+        keywordLike,
+        keywordLike,
+        keywordLike,
+        keywordLike
+      );
+    }
+
+    const whereClause = filterConditions.length
+      ? `WHERE ${filterConditions.join(" AND ")}`
+      : "";
+
+    const perPage = parseInt(filters.per_page) || 15;
+    const page = parseInt(filters.page) || 1;
+    const offset = (page - 1) * perPage;
+
+    // Count total records
+    const countQuery = `SELECT COUNT(*) AS total FROM customers ${whereClause}`;
+    const [countResult] = await db.query(countQuery, values);
+    const total = countResult[0]?.total || 0;
+
+    // Get paginated customer data
+    const customerQuery = `
+      SELECT * FROM customers
+      ${whereClause}
+      ORDER BY created_at DESC
+      LIMIT ? OFFSET ?
+    `;
+    const customerValues = [...values, perPage, offset];
+    const [customerRows] = await db.query(customerQuery, customerValues);
+
+    // Get sales data for customers
+    const customerIds = customerRows.map((c) => c.id);
+    let salesData = [];
+    let paymentData = [];
+
+    if (customerIds.length > 0) {
+      // Base sales query with status condition
+      let salesQuery = `
+        SELECT
+          customer_id,
+          COUNT(*) as total_sales,
+          SUM(grand_total) as total_amount,
+          GROUP_CONCAT(id) as sale_ids
+        FROM sales
+        WHERE customer_id IN (${customerIds.map(() => "?").join(",")})
+        AND status = 1
+      `;
+
+      let salesParams = [...customerIds];
+
+      // Add company filter if user has a company
+      if (user && user.company_id) {
+        salesQuery += ` AND company_id = ?`;
+        salesParams.push(user.company_id);
+      }
+
+      salesQuery += ` GROUP BY customer_id`;
+
+      [salesData] = await db.query(salesQuery, salesParams);
+
+      // Get payment totals for the filtered sales
+      if (salesData.length > 0) {
+        const saleIds = salesData.flatMap((s) => s.sale_ids.split(","));
+
+        let paymentQuery = `
+          SELECT
+            s.customer_id,
+            SUM(p.amount) as paid_amount
+          FROM payments p
+          JOIN sales s ON s.id = p.paymentable_id AND p.paymentable_type = 'App\\\\Models\\\\Sale'
+          WHERE p.paymentable_id IN (${saleIds.map(() => "?").join(",")})
+        `;
+
+        let paymentParams = [...saleIds];
+
+        // Add company filter if user has a company
+        if (user && user.company_id) {
+          paymentQuery += `
+            AND p.paymentable_id IN (
+              SELECT id FROM sales WHERE company_id = ?
+            )
+          `;
+          paymentParams.push(user.company_id);
+        }
+
+        paymentQuery += ` GROUP BY s.customer_id`;
+
+        [paymentData] = await db.query(paymentQuery, paymentParams);
+      }
+    }
+
+    // Create maps for quick lookup
+    const salesMap = salesData.reduce((acc, curr) => {
+      acc[curr.customer_id] = {
+        total_sales: curr.total_sales || 0,
+        total_amount: curr.total_amount ? parseInt(curr.total_amount) : 0,
+      };
+      return acc;
+    }, {});
+
+    const paymentMap = paymentData.reduce((acc, curr) => {
+      acc[curr.customer_id] = {
+        paid_amount: curr.paid_amount ? parseInt(curr.paid_amount) : 0,
+      };
+      return acc;
+    }, {});
+
+    // Enrich customer data with sales and payment info
+    const enrichedCustomers = customerRows.map((customer) => ({
+      ...customer,
+      total_sales: salesMap[customer.id]?.total_sales || 0,
+      total_amount: salesMap[customer.id]?.total_amount || 0,
+      paid_amount: paymentMap[customer.id]?.paid_amount || 0,
+    }));
+
+    // Calculate pagination metadata
+    const totalPages = Math.ceil(total / perPage);
+    const baseUrl = `${process.env.APP_URL}/api/report/customers_report`;
+
+    const response = {
+      status: "Success",
+      data: {
+        current_page: page,
+        data: enrichedCustomers,
+        first_page_url: `${baseUrl}?page=1`,
+        from: offset + 1,
+        last_page: totalPages,
+        last_page_url: `${baseUrl}?page=${totalPages}`,
+        links: [
+          {
+            url: page > 1 ? `${baseUrl}?page=${page - 1}` : null,
+            label: "&laquo; Anterior",
+            active: false,
+          },
+          {
+            url: `${baseUrl}?page=${page}`,
+            label: page.toString(),
+            active: true,
+          },
+          {
+            url: page < totalPages ? `${baseUrl}?page=${page + 1}` : null,
+            label: "Siguiente &raquo;",
+            active: false,
+          },
+        ],
+        next_page_url: page < totalPages ? `${baseUrl}?page=${page + 1}` : null,
+        path: baseUrl,
+        per_page: perPage,
+        prev_page_url: page > 1 ? `${baseUrl}?page=${page - 1}` : null,
+        to: Math.min(offset + perPage, total),
+        total: total,
+      },
+      message: null,
+    };
+
+    return response;
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "Error",
+      message: "Failed to fetch customers report",
+      data: null,
+    };
+  }
+};
