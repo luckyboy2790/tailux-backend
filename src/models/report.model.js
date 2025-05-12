@@ -1027,3 +1027,205 @@ exports.getExpiredPurchasesReport = async (filters) => {
     };
   }
 };
+
+exports.getSalesReport = async (req) => {
+  try {
+    const {
+      company_id,
+      customer_id,
+      user_id,
+      keyword,
+      startDate,
+      endDate,
+      per_page = 15,
+      page = 1,
+    } = req.query;
+
+    let query = `
+      SELECT s.* FROM sales s
+      LEFT JOIN companies c ON s.company_id = c.id
+      LEFT JOIN stores st ON s.store_id = st.id
+      LEFT JOIN users u ON s.user_id = u.id
+      LEFT JOIN customers cust ON s.customer_id = cust.id
+    `;
+
+    const whereClauses = [];
+    const params = [];
+
+    if (
+      req.user &&
+      (req.user.role === "user" || req.user.role === "secretary")
+    ) {
+      whereClauses.push("s.company_id = ?");
+      params.push(req.user.company_id);
+    }
+
+    if (company_id) {
+      whereClauses.push("s.company_id = ?");
+      params.push(company_id);
+    }
+
+    if (customer_id) {
+      whereClauses.push("s.customer_id = ?");
+      params.push(customer_id);
+    }
+
+    if (user_id) {
+      whereClauses.push("s.user_id = ?");
+      params.push(user_id);
+    }
+
+    if (keyword) {
+      whereClauses.push(`
+        (s.reference_no LIKE ? OR
+        c.name LIKE ? OR
+        st.name LIKE ? OR
+        s.timestamp LIKE ?)
+      `);
+      const likeKeyword = `%${keyword}%`;
+      params.push(likeKeyword, likeKeyword, likeKeyword, likeKeyword);
+    }
+
+    if (startDate && endDate) {
+      if (startDate === endDate) {
+        whereClauses.push("DATE(s.timestamp) = ?");
+        params.push(startDate);
+      } else {
+        whereClauses.push("s.timestamp BETWEEN ? AND ?");
+        params.push(startDate, endDate);
+      }
+    }
+
+    if (whereClauses.length > 0) {
+      query += " WHERE " + whereClauses.join(" AND ");
+    }
+
+    query += " ORDER BY s.timestamp DESC";
+
+    const countQuery = `SELECT COUNT(*) as total FROM (${query}) as count_table`;
+    const [countResult] = await db.query(countQuery, params);
+    const total = countResult[0].total;
+
+    const offset = (page - 1) * per_page;
+    query += " LIMIT ? OFFSET ?";
+    params.push(parseInt(per_page), offset);
+
+    const [sales] = await db.query(query, params);
+
+    for (const sale of sales) {
+      const [company] = await db.query("SELECT * FROM companies WHERE id = ?", [
+        sale.company_id,
+      ]);
+      sale.company = company[0] || null;
+
+      const [store] = await db.query("SELECT * FROM stores WHERE id = ?", [
+        sale.store_id,
+      ]);
+      if (store[0]) {
+        const [storeCompany] = await db.query(
+          "SELECT * FROM companies WHERE id = ?",
+          [store[0].company_id]
+        );
+        store[0].company = storeCompany[0] || null;
+      }
+      sale.store = store[0] || null;
+
+      const [user] = await db.query("SELECT * FROM users WHERE id = ?", [
+        sale.user_id,
+      ]);
+      sale.user = user[0] || null;
+
+      const [customer] = await db.query(
+        "SELECT * FROM customers WHERE id = ?",
+        [sale.customer_id]
+      );
+      sale.customer = customer[0] || null;
+
+      const [orders] = await db.query(
+        `
+        SELECT o.*, p.*
+        FROM orders o
+        LEFT JOIN products p ON o.product_id = p.id
+        WHERE o.orderable_id = ? AND o.orderable_type = 'App\\\\Models\\\\Sale'
+      `,
+        [sale.id]
+      );
+
+      sale.orders = orders.map((order) => {
+        const product = {};
+        for (const key in order) {
+          if (key.startsWith("product_")) {
+            product[key.replace("product_", "")] = order[key];
+            delete order[key];
+          }
+        }
+        order.product = product;
+        return order;
+      });
+
+      const [payments] = await db.query(
+        `
+        SELECT SUM(amount) as paid_amount
+        FROM payments
+        WHERE paymentable_id = ? AND paymentable_type = 'App\\\\Models\\\\Sale' AND status = 1
+      `,
+        [sale.id]
+      );
+
+      sale.paid_amount = payments[0].paid_amount
+        ? parseInt(payments[0].paid_amount)
+        : 0;
+    }
+
+    const last_page = Math.ceil(total / per_page);
+    const path = `${req.protocol}://${req.get("host")}${req.baseUrl}${
+      req.path
+    }`;
+
+    const pagination = {
+      current_page: parseInt(page),
+      data: sales,
+      first_page_url: `${path}?page=1`,
+      from: offset + 1,
+      last_page,
+      last_page_url: `${path}?page=${last_page}`,
+      links: [
+        {
+          url: page > 1 ? `${path}?page=${parseInt(page) - 1}` : null,
+          label: "&laquo; Anterior",
+          active: false,
+        },
+        {
+          url: `${path}?page=${page}`,
+          label: page.toString(),
+          active: true,
+        },
+        {
+          url: page < last_page ? `${path}?page=${parseInt(page) + 1}` : null,
+          label: "Siguiente &raquo;",
+          active: false,
+        },
+      ],
+      next_page_url:
+        page < last_page ? `${path}?page=${parseInt(page) + 1}` : null,
+      path,
+      per_page: parseInt(per_page),
+      prev_page_url: page > 1 ? `${path}?page=${parseInt(page) - 1}` : null,
+      to: Math.min(offset + parseInt(per_page), total),
+      total,
+    };
+
+    return {
+      status: "Success",
+      data: pagination,
+      message: null,
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "Failed",
+      data: null,
+      message: error.message,
+    };
+  }
+};

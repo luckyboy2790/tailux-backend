@@ -18,5 +18,6 @@ router.get(
   "/expired_purchases_report",
   reportController.getExpiredPurchasesReportSearch
 );
+router.get("/sales", reportController.getSalesReportSearch);
 
 module.exports = router;
