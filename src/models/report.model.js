@@ -1251,13 +1251,6 @@ exports.getPurchasesReport = async (req) => {
     const values = [];
     const filterConditions = ["p.status = 1"];
 
-    // Handle user role filtering (not implemented in this example)
-    // const auth_user = req.user;
-    // if (auth_user.role === 'user' || auth_user.role === 'secretary') {
-    //   filterConditions.push("p.company_id = ?");
-    //   values.push(auth_user.company_id);
-    // }
-
     if (company_id) {
       filterConditions.push("p.company_id = ?");
       values.push(company_id);
@@ -1308,12 +1301,10 @@ exports.getPurchasesReport = async (req) => {
         ? `WHERE ${filterConditions.join(" AND ")}`
         : "";
 
-    // Count total records
     const countQuery = `SELECT COUNT(*) AS total FROM purchases p ${whereClause}`;
     const [countResult] = await db.query(countQuery, values);
     const total = countResult[0]?.total || 0;
 
-    // Main query for purchases
     const purchaseQuery = `
       SELECT
         p.*,
@@ -1381,7 +1372,6 @@ exports.getPurchasesReport = async (req) => {
       };
     }
 
-    // Get orders for the purchases
     const [orders] = await db.query(
       `
       SELECT
@@ -1402,7 +1392,6 @@ exports.getPurchasesReport = async (req) => {
       purchaseIds
     );
 
-    // Get payments for the purchases
     const [payments] = await db.query(
       `
       SELECT
@@ -1415,7 +1404,6 @@ exports.getPurchasesReport = async (req) => {
       purchaseIds
     );
 
-    // Get returns for the purchases
     const [preturns] = await db.query(
       `
       SELECT
@@ -1427,7 +1415,6 @@ exports.getPurchasesReport = async (req) => {
       purchaseIds
     );
 
-    // Get images for the purchases
     const [images] = await db.query(
       `
       SELECT
@@ -1442,7 +1429,6 @@ exports.getPurchasesReport = async (req) => {
       purchaseIds
     );
 
-    // Helper function to map items by purchase_id
     const mapById = (items, key = "purchase_id") => {
       const map = {};
       for (const item of items) {
@@ -1458,7 +1444,6 @@ exports.getPurchasesReport = async (req) => {
     const returnMap = mapById(preturns);
     const imageMap = mapById(images);
 
-    // Enrich purchase data with related information
     const enriched = purchaseRows.map((row) => {
       const totalPaid = (paymentMap[row.id] || []).reduce(
         (sum, p) => sum + parseFloat(p.amount),
@@ -1555,7 +1540,6 @@ exports.getPurchasesReport = async (req) => {
       };
     });
 
-    // Calculate pagination metadata
     const last_page = Math.ceil(total / per_page);
     const baseUrl = `${req.protocol}://${req.get("host")}${req.baseUrl}${
       req.path
@@ -1574,7 +1558,6 @@ exports.getPurchasesReport = async (req) => {
         ? `${baseUrl}?${queryParams.toString()}&page=${parseInt(page) - 1}`
         : null;
 
-    // Generate pagination links
     const links = [
       {
         url: prev_page_url,
@@ -1583,7 +1566,6 @@ exports.getPurchasesReport = async (req) => {
       },
     ];
 
-    // Add page links (simplified version - in real app you might want to limit visible pages)
     for (let i = 1; i <= Math.min(10, last_page); i++) {
       links.push({
         url: `${baseUrl}?${queryParams.toString()}&page=${i}`,
@@ -1640,6 +1622,407 @@ exports.getPurchasesReport = async (req) => {
     return {
       status: "Error",
       message: "Failed to fetch purchases report",
+      data: null,
+    };
+  }
+};
+
+exports.getPaymentsReport = async (filters) => {
+  try {
+    const values = [];
+    const filterConditions = [];
+
+    let company_id = filters.company_id || "";
+    if (company_id !== "") {
+      filterConditions.push("p.company_id = ?");
+      values.push(company_id);
+    }
+
+    if (filters.type === "sale") {
+      filterConditions.push("p.paymentable_type = 'App\\\\Models\\\\Sale'");
+      if (company_id !== "") {
+        filterConditions.push(
+          "p.paymentable_id IN (SELECT id FROM sales WHERE company_id = ? AND status = 1)"
+        );
+        values.push(company_id);
+      }
+    } else if (filters.type === "purchase") {
+      filterConditions.push("p.paymentable_type = 'App\\\\Models\\\\Purchase'");
+      if (company_id !== "") {
+        filterConditions.push(
+          "p.paymentable_id IN (SELECT id FROM purchases WHERE company_id = ? AND status = 1)"
+        );
+        values.push(company_id);
+      }
+    }
+
+    if (filters.supplier_id) {
+      filterConditions.push(`
+        p.paymentable_type = 'App\\\\Models\\\\Purchase' AND
+        p.paymentable_id IN (SELECT id FROM purchases WHERE supplier_id = ? AND status = 1)
+      `);
+      values.push(filters.supplier_id);
+    }
+
+    if (filters.customer_id) {
+      filterConditions.push(`
+        p.paymentable_type = 'App\\\\Models\\\\Sale' AND
+        p.paymentable_id IN (SELECT id FROM sales WHERE customer_id = ? AND status = 1)
+      `);
+      values.push(filters.customer_id);
+    }
+
+    if (filters.user_id) {
+      filterConditions.push(`
+        (p.paymentable_type = 'App\\\\Models\\\\Purchase' AND p.paymentable_id IN (SELECT id FROM purchases WHERE user_id = ? AND status = 1)) OR
+        (p.paymentable_type = 'App\\\\Models\\\\Sale' AND p.paymentable_id IN (SELECT id FROM sales WHERE user_id = ? AND status = 1))
+      `);
+      values.push(filters.user_id, filters.user_id);
+    }
+
+    if (filters.reference_no) {
+      filterConditions.push("p.reference_no LIKE ?");
+      values.push(`%${filters.reference_no}%`);
+    }
+
+    if (filters.startDate && filters.endDate) {
+      if (filters.startDate === filters.endDate) {
+        filterConditions.push("DATE(p.timestamp) = ?");
+        values.push(filters.startDate);
+      } else {
+        filterConditions.push("p.timestamp BETWEEN ? AND ?");
+        values.push(filters.startDate, filters.endDate);
+      }
+    }
+
+    const whereClause = filterConditions.length
+      ? `WHERE ${filterConditions.join(" AND ")}`
+      : "";
+
+    const perPage = parseInt(filters.per_page) || 15;
+    const page = parseInt(filters.page) || 1;
+    const offset = (page - 1) * perPage;
+
+    const countQuery = `SELECT COUNT(*) AS total FROM payments p ${whereClause}`;
+    const [countResult] = await db.query(countQuery, values);
+    const total = countResult[0]?.total || 0;
+
+    const paymentQuery = `
+      SELECT
+        p.*,
+        CASE
+          WHEN p.paymentable_type = 'App\\\\Models\\\\Purchase' THEN pur.supplier_id
+          WHEN p.paymentable_type = 'App\\\\Models\\\\Sale' THEN s.customer_id
+          ELSE NULL
+        END AS related_id,
+        CASE
+          WHEN p.paymentable_type = 'App\\\\Models\\\\Purchase' THEN sup.name
+          WHEN p.paymentable_type = 'App\\\\Models\\\\Sale' THEN c.name
+          ELSE NULL
+        END AS supplier,
+        CASE
+          WHEN p.paymentable_type = 'App\\\\Models\\\\Purchase' THEN pur.reference_no
+          WHEN p.paymentable_type = 'App\\\\Models\\\\Sale' THEN s.reference_no
+          ELSE NULL
+        END AS paymentable_reference_no,
+        CASE
+          WHEN p.paymentable_type = 'App\\\\Models\\\\Purchase' THEN pur.grand_total
+          WHEN p.paymentable_type = 'App\\\\Models\\\\Sale' THEN s.grand_total
+          ELSE NULL
+        END AS paymentable_grand_total,
+        CASE
+          WHEN p.paymentable_type = 'App\\\\Models\\\\Purchase' THEN pur.company_id
+          WHEN p.paymentable_type = 'App\\\\Models\\\\Sale' THEN s.company_id
+          ELSE NULL
+        END AS paymentable_company_id,
+        CASE
+          WHEN p.paymentable_type = 'App\\\\Models\\\\Purchase' THEN pur.timestamp
+          WHEN p.paymentable_type = 'App\\\\Models\\\\Sale' THEN s.timestamp
+          ELSE NULL
+        END AS paymentable_timestamp,
+        CASE
+          WHEN p.paymentable_type = 'App\\\\Models\\\\Purchase' THEN pur.credit_days
+          WHEN p.paymentable_type = 'App\\\\Models\\\\Sale' THEN NULL
+          ELSE NULL
+        END AS paymentable_credit_days,
+        CASE
+          WHEN p.paymentable_type = 'App\\\\Models\\\\Purchase' THEN pur.expiry_date
+          WHEN p.paymentable_type = 'App\\\\Models\\\\Sale' THEN NULL
+          ELSE NULL
+        END AS paymentable_expiry_date
+      FROM payments p
+      LEFT JOIN purchases pur ON p.paymentable_type = 'App\\\\Models\\\\Purchase' AND p.paymentable_id = pur.id
+      LEFT JOIN sales s ON p.paymentable_type = 'App\\\\Models\\\\Sale' AND p.paymentable_id = s.id
+      LEFT JOIN suppliers sup ON pur.supplier_id = sup.id
+      LEFT JOIN customers c ON s.customer_id = c.id
+      ${whereClause}
+      ORDER BY p.timestamp ${filters.sort_by_date === "asc" ? "ASC" : "DESC"}
+      LIMIT ? OFFSET ?
+    `;
+
+    const paymentValues = [...values, perPage, offset];
+    const [paymentRows] = await db.query(paymentQuery, paymentValues);
+
+    if (!paymentRows.length) {
+      return {
+        status: "Success",
+        data: {
+          current_page: page,
+          per_page: perPage,
+          total,
+          total_pages: Math.ceil(total / perPage),
+          data: [],
+        },
+        message: null,
+      };
+    }
+
+    const paymentIds = paymentRows.map((p) => p.id);
+
+    const [images] = await db.query(
+      `SELECT *, imageable_id AS payment_id,
+              CONCAT('http://your-domain.com/storage', path) AS src,
+              'image' AS type
+       FROM images
+       WHERE imageable_type = 'App\\\\Models\\\\Payment'
+         AND imageable_id IN (${paymentIds.map(() => "?").join(",")})`,
+      paymentIds
+    );
+
+    const purchasePaymentIds = paymentRows
+      .filter((p) => p.paymentable_type === "App\\Models\\Purchase")
+      .map((p) => p.paymentable_id);
+
+    let purchases = [];
+    if (purchasePaymentIds.length) {
+      const [purchaseRows] = await db.query(
+        `SELECT pur.*,
+                sup.id AS supplier_id,
+                sup.name AS supplier_name,
+                sup.company AS supplier_company,
+                sup.email AS supplier_email,
+                sup.phone_number AS supplier_phone,
+                sup.address AS supplier_address,
+                sup.city AS supplier_city,
+                sup.note AS supplier_note,
+                (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE paymentable_type = 'App\\\\Models\\\\Purchase' AND paymentable_id = pur.id) AS paid_amount,
+                (SELECT COALESCE(SUM(amount), 0) FROM preturns WHERE purchase_id = pur.id) AS returned_amount
+         FROM purchases pur
+         LEFT JOIN suppliers sup ON pur.supplier_id = sup.id
+         WHERE pur.id IN (${purchasePaymentIds.map(() => "?").join(",")})`,
+        purchasePaymentIds
+      );
+      purchases = purchaseRows;
+    }
+
+    const salePaymentIds = paymentRows
+      .filter((p) => p.paymentable_type === "App\\Models\\Sale")
+      .map((p) => p.paymentable_id);
+
+    let sales = [];
+    if (salePaymentIds.length) {
+      const [saleRows] = await db.query(
+        `SELECT s.*,
+                c.id AS customer_id,
+                c.name AS customer_name,
+                c.company AS customer_company,
+                c.email AS customer_email,
+                c.phone_number AS customer_phone,
+                c.address AS customer_address,
+                c.city AS customer_city,
+                (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE paymentable_type = 'App\\\\Models\\\\Sale' AND paymentable_id = s.id) AS paid_amount
+         FROM sales s
+         LEFT JOIN customers c ON s.customer_id = c.id
+         WHERE s.id IN (${salePaymentIds.map(() => "?").join(",")})`,
+        salePaymentIds
+      );
+      sales = saleRows;
+    }
+
+    const imageMap = {};
+    images.forEach((img) => {
+      if (!imageMap[img.payment_id]) imageMap[img.payment_id] = [];
+      imageMap[img.payment_id].push(img);
+    });
+
+    const purchaseMap = {};
+    purchases.forEach((p) => {
+      purchaseMap[p.id] = p;
+    });
+
+    const saleMap = {};
+    sales.forEach((s) => {
+      saleMap[s.id] = s;
+    });
+
+    const enriched = paymentRows.map((payment) => {
+      let paymentable = null;
+      let supplier = null;
+
+      if (
+        payment.paymentable_type === "App\\Models\\Purchase" &&
+        purchaseMap[payment.paymentable_id]
+      ) {
+        const purchase = purchaseMap[payment.paymentable_id];
+        paymentable = {
+          id: purchase.id,
+          user_id: purchase.user_id,
+          timestamp: purchase.timestamp,
+          reference_no: purchase.reference_no,
+          store_id: purchase.store_id,
+          company_id: purchase.company_id,
+          supplier_id: purchase.supplier_id,
+          discount: purchase.discount,
+          discount_string: purchase.discount_string,
+          shipping: purchase.shipping,
+          shipping_string: purchase.shipping_string,
+          returns: purchase.returns,
+          grand_total: purchase.grand_total,
+          credit_days: purchase.credit_days,
+          expiry_date: purchase.expiry_date,
+          attachment: purchase.attachment,
+          note: purchase.note,
+          status: purchase.status,
+          order_id: purchase.order_id,
+          created_at: purchase.created_at,
+          updated_at: purchase.updated_at,
+          total_amount: purchase.grand_total,
+          paid_amount: purchase.paid_amount || 0,
+          returned_amount: purchase.returned_amount || 0,
+          supplier: {
+            id: purchase.supplier_id,
+            name: purchase.supplier_name,
+            company: purchase.supplier_company,
+            email: purchase.supplier_email,
+            phone_number: purchase.supplier_phone,
+            address: purchase.supplier_address,
+            city: purchase.supplier_city,
+            note: purchase.supplier_note,
+          },
+        };
+        supplier = purchase.supplier_name;
+      } else if (
+        payment.paymentable_type === "App\\Models\\Sale" &&
+        saleMap[payment.paymentable_id]
+      ) {
+        const sale = saleMap[payment.paymentable_id];
+        paymentable = {
+          id: sale.id,
+          user_id: sale.user_id,
+          timestamp: sale.timestamp,
+          reference_no: sale.reference_no,
+          store_id: sale.store_id,
+          company_id: sale.company_id,
+          biller_id: sale.biller_id,
+          customer_id: sale.customer_id,
+          attachment: sale.attachment,
+          note: sale.note,
+          status: sale.status,
+          discount: sale.discount,
+          discount_string: sale.discount_string,
+          shipping: sale.shipping,
+          shipping_string: sale.shipping_string,
+          grand_total: sale.grand_total,
+          created_at: sale.created_at,
+          updated_at: sale.updated_at,
+          total_amount: sale.grand_total,
+          paid_amount: sale.paid_amount || 0,
+          customer: sale.customer_id
+            ? {
+                id: sale.customer_id,
+                name: sale.customer_name,
+                company: sale.customer_company,
+                email: sale.customer_email,
+                phone_number: sale.customer_phone,
+                address: sale.customer_address,
+                city: sale.customer_city,
+              }
+            : null,
+        };
+        supplier = sale.customer_name;
+      }
+
+      return {
+        ...payment,
+        supplier: supplier || payment.supplier,
+        images: imageMap[payment.id] || [],
+        paymentable: paymentable,
+      };
+    });
+
+    const totalPages = Math.ceil(total / perPage);
+    const baseUrl = `http://your-domain.com/api/report/payments_report`;
+
+    const links = [
+      {
+        url: page > 1 ? `${baseUrl}?page=${page - 1}` : null,
+        label: "&laquo; Anterior",
+        active: false,
+      },
+    ];
+
+    const maxPagesToShow = 10;
+    let startPage = Math.max(1, page - Math.floor(maxPagesToShow / 2));
+    let endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
+
+    if (endPage - startPage + 1 < maxPagesToShow) {
+      startPage = Math.max(1, endPage - maxPagesToShow + 1);
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+      links.push({
+        url: `${baseUrl}?page=${i}`,
+        label: i.toString(),
+        active: i === page,
+      });
+    }
+
+    if (endPage < totalPages - 1) {
+      links.push({
+        url: null,
+        label: "...",
+        active: false,
+      });
+    }
+
+    if (endPage < totalPages) {
+      links.push({
+        url: `${baseUrl}?page=${totalPages}`,
+        label: totalPages.toString(),
+        active: false,
+      });
+    }
+
+    links.push({
+      url: page < totalPages ? `${baseUrl}?page=${page + 1}` : null,
+      label: "Siguiente &raquo;",
+      active: false,
+    });
+
+    return {
+      status: "Success",
+      data: {
+        current_page: page,
+        data: enriched,
+        first_page_url: `${baseUrl}?page=1`,
+        from: (page - 1) * perPage + 1,
+        last_page: totalPages,
+        last_page_url: `${baseUrl}?page=${totalPages}`,
+        links,
+        next_page_url: page < totalPages ? `${baseUrl}?page=${page + 1}` : null,
+        path: baseUrl,
+        per_page: perPage,
+        prev_page_url: page > 1 ? `${baseUrl}?page=${page - 1}` : null,
+        to: Math.min(page * perPage, total),
+        total,
+      },
+      message: null,
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "Error",
+      message: "Failed to fetch payments report",
       data: null,
     };
   }

@@ -20,5 +20,6 @@ router.get(
 );
 router.get("/sales", reportController.getSalesReportSearch);
 router.get("/purchases", reportController.getPurchasesReportSearch);
+router.get("/payments", reportController.getPaymentsReportSearch);
 
 module.exports = router;
