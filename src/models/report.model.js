@@ -12,7 +12,6 @@ exports.getOverviewChartData = async (req) => {
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth();
 
-    // Format dates as 'YYYY-MM-DD' to match Laravel's Carbon format
     const formatDate = (date) => {
       const year = date.getFullYear();
       const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -58,8 +57,6 @@ exports.getOverviewChartData = async (req) => {
       },
     };
 
-    // Get purchase data - matches Laravel logic
-    // First get purchase IDs for the period, then sum related order subtotals
     const [thisMonthPurchases] = await db.query(
       `SELECT id FROM purchases
        WHERE company_id = ? AND DATE(timestamp) BETWEEN ? AND ?`,
@@ -72,7 +69,6 @@ exports.getOverviewChartData = async (req) => {
       [company_id, startLastMonth, endLastMonth]
     );
 
-    // Get purchase totals from orders table
     if (thisMonthPurchases.length > 0) {
       const purchaseIds = thisMonthPurchases.map((p) => p.id);
       const [thisMonthPurchaseTotal] = await db.query(
@@ -93,8 +89,6 @@ exports.getOverviewChartData = async (req) => {
       data.last_month.purchase = Number(lastMonthPurchaseTotal[0].total) || 0;
     }
 
-    // Get sale data - matches Laravel logic
-    // First get sale IDs for the period, then sum related order subtotals
     const [thisMonthSales] = await db.query(
       `SELECT id FROM sales
        WHERE company_id = ? AND DATE(timestamp) BETWEEN ? AND ?`,
@@ -107,7 +101,6 @@ exports.getOverviewChartData = async (req) => {
       [company_id, startLastMonth, endLastMonth]
     );
 
-    // Get sale totals from orders table
     if (thisMonthSales.length > 0) {
       const saleIds = thisMonthSales.map((s) => s.id);
       const [thisMonthSaleTotal] = await db.query(
@@ -145,41 +138,22 @@ exports.getOverviewChartData = async (req) => {
 
 exports.getCompanyChartData = async (req) => {
   try {
-    // Get user role from request (assuming you have authentication middleware)
-    // const userRole = req.user.role;
-
-    // Initialize variables
     let companies = [];
     let company_names = [];
     let company_purchases_array = [];
     let company_sales_array = [];
 
-    // Get companies based on user role
-    // if (userRole === "user" || userRole === "secretary") {
-    //   // For regular users or secretaries, only get their company
-    //   const [userCompany] = await db.query(
-    //     `SELECT * FROM companies WHERE id = ?`,
-    //     [req.user.company_id]
-    //   );
-    //   companies = userCompany;
-    // } else {
-    // For admins, get all companies
     const [allCompanies] = await db.query(`SELECT * FROM companies`);
     companies = allCompanies;
-    // }
 
-    // Extract company names
     company_names = companies.map((company) => company.name);
 
-    // Process each company
     for (const company of companies) {
-      // Initialize purchase and sale queries
       let purchaseQuery = `SELECT id FROM purchases WHERE company_id = ?`;
       let saleQuery = `SELECT id FROM sales WHERE company_id = ?`;
       const purchaseParams = [company.id];
       const saleParams = [company.id];
 
-      // Apply date filters if provided
       if (req.query.startDate && req.query.endDate) {
         if (req.query.startDate === req.query.endDate) {
           purchaseQuery += ` AND DATE(timestamp) = ?`;
@@ -194,15 +168,12 @@ exports.getCompanyChartData = async (req) => {
         }
       }
 
-      // Get purchase IDs for the company
       const [companyPurchases] = await db.query(purchaseQuery, purchaseParams);
       const purchaseIds = companyPurchases.map((p) => p.id);
 
-      // Get sale IDs for the company
       const [companySales] = await db.query(saleQuery, saleParams);
       const saleIds = companySales.map((s) => s.id);
 
-      // Calculate purchase total
       let companyPurchasesTotal = 0;
       if (purchaseIds.length > 0) {
         const [purchaseTotal] = await db.query(
@@ -213,7 +184,6 @@ exports.getCompanyChartData = async (req) => {
         companyPurchasesTotal = Number(purchaseTotal[0].total) || 0;
       }
 
-      // Calculate sale total
       let companySalesTotal = 0;
       if (saleIds.length > 0) {
         const [saleTotal] = await db.query(
@@ -224,7 +194,6 @@ exports.getCompanyChartData = async (req) => {
         companySalesTotal = Number(saleTotal[0].total) || 0;
       }
 
-      // Add to results arrays
       company_purchases_array.push(companyPurchasesTotal);
       company_sales_array.push(companySalesTotal);
     }
@@ -250,20 +219,13 @@ exports.getCompanyChartData = async (req) => {
 
 exports.getStoreChartData = async (req) => {
   try {
-    // Initialize variables
     let store_names = [];
     let store_purchases_array = [];
     let store_sales_array = [];
 
-    // Get stores based on user role
     let storesQuery = "SELECT * FROM stores";
     const whereClauses = [];
     const params = [];
-
-    // if (req.user.role === "user" || req.user.role === "secretary") {
-    //   whereClauses.push("company_id = ?");
-    //   params.push(req.user.company_id);
-    // }
 
     if (whereClauses.length > 0) {
       storesQuery += " WHERE " + whereClauses.join(" AND ");
@@ -271,18 +233,14 @@ exports.getStoreChartData = async (req) => {
 
     const [stores] = await db.query(storesQuery, params);
 
-    // Extract store names
     store_names = stores.map((store) => store.name);
 
-    // Process each store
     for (const store of stores) {
-      // Initialize purchase and sale queries
       let purchaseQuery = "SELECT id FROM purchases WHERE store_id = ?";
       let saleQuery = "SELECT id FROM sales WHERE store_id = ?";
       const purchaseParams = [store.id];
       const saleParams = [store.id];
 
-      // Apply date filters if provided
       if (req.query.startDate && req.query.endDate) {
         if (req.query.startDate === req.query.endDate) {
           purchaseQuery += " AND DATE(timestamp) = ?";
@@ -297,11 +255,9 @@ exports.getStoreChartData = async (req) => {
         }
       }
 
-      // Get purchases and sales for the store
       const [storePurchases] = await db.query(purchaseQuery, purchaseParams);
       const [storeSales] = await db.query(saleQuery, saleParams);
 
-      // Calculate totals from orders table
       let storePurchasesTotal = 0;
       let storeSalesTotal = 0;
 
@@ -325,7 +281,6 @@ exports.getStoreChartData = async (req) => {
         storeSalesTotal = Number(saleTotal[0].total) || 0;
       }
 
-      // Add to results arrays
       store_purchases_array.push(storePurchasesTotal);
       store_sales_array.push(storeSalesTotal);
     }
@@ -351,7 +306,6 @@ exports.getStoreChartData = async (req) => {
 
 exports.getProductQuantityAlert = async (req) => {
   try {
-    // First, get all products with their images
     const [products] = await db.query(
       `SELECT
         p.*,
@@ -366,7 +320,6 @@ exports.getProductQuantityAlert = async (req) => {
       ORDER BY p.id`
     );
 
-    // Then get images for each product
     for (const product of products) {
       const [images] = await db.query(
         `SELECT
@@ -383,7 +336,6 @@ exports.getProductQuantityAlert = async (req) => {
         [product.id]
       );
 
-      // Format images with src if path exists
       product.images = images.map((img) => {
         const imageData = {
           id: img.id,
@@ -405,8 +357,6 @@ exports.getProductQuantityAlert = async (req) => {
         return imageData;
       });
 
-      // Calculate quantity exactly like Laravel does
-      // Get purchase quantities
       const [purchaseQuantities] = await db.query(
         `SELECT SUM(o.quantity) as total_quantity
         FROM orders o
@@ -416,7 +366,6 @@ exports.getProductQuantityAlert = async (req) => {
         [product.id]
       );
 
-      // Get sale quantities
       const [saleQuantities] = await db.query(
         `SELECT SUM(o.quantity) as total_quantity
         FROM orders o
@@ -430,7 +379,6 @@ exports.getProductQuantityAlert = async (req) => {
       const quantitySale = saleQuantities[0].total_quantity || 0;
       product.quantity = quantityPurchase - quantitySale;
 
-      // Set default values for missing fields
       product.barcode_symbology_id = product.barcode_symbology_id || 1;
       product.category_id = product.category_id || 1;
       product.tax_id = product.tax_id || 1;
@@ -439,7 +387,6 @@ exports.getProductQuantityAlert = async (req) => {
       product.image = product.image || null;
       product.detail = product.detail || null;
 
-      // Format dates to ISO string
       if (product.created_at) {
         product.created_at = new Date(product.created_at).toISOString();
       }
@@ -467,7 +414,6 @@ exports.getProductExpiryAlert = async (req) => {
   try {
     const { company_id, product_id, per_page = 15, page = 1 } = req.query;
 
-    // Base query
     let query = `
       SELECT o.*,
              p.name as product_name, p.code as product_code, p.unit as product_unit,
@@ -491,13 +437,11 @@ exports.getProductExpiryAlert = async (req) => {
 
     const params = [new Date().toISOString().split("T")[0]];
 
-    // Add company filter if provided
     if (company_id) {
       query += ` AND pur.company_id = ?`;
       params.push(company_id);
     }
 
-    // Add product filter if provided
     if (product_id) {
       query += ` AND o.product_id = ?`;
       params.push(product_id);
@@ -506,21 +450,17 @@ exports.getProductExpiryAlert = async (req) => {
     const [countResult] = await db.query(query, params);
     const total = countResult.length || 0;
 
-    // Add ordering and pagination
     query += ` ORDER BY o.created_at DESC LIMIT ? OFFSET ?`;
     const limit = parseInt(per_page);
     const offset = (parseInt(page) - 1) * limit;
     params.push(limit, offset);
 
-    // Execute the query
     const [orders] = await db.query(query, params);
 
-    // Get product IDs to fetch images
     const productIds = orders
       .map((order) => order.product_id)
       .filter((id, index, self) => self.indexOf(id) === index);
 
-    // Fetch images for all products
     let productImages = {};
     if (productIds.length > 0) {
       const [images] = await db.query(
@@ -532,7 +472,6 @@ exports.getProductExpiryAlert = async (req) => {
         [productIds]
       );
 
-      // Group images by product ID
       productImages = images.reduce((acc, image) => {
         if (!acc[image.imageable_id]) {
           acc[image.imageable_id] = [];
@@ -544,13 +483,12 @@ exports.getProductExpiryAlert = async (req) => {
           imageable_type: image.imageable_type,
           created_at: image.created_at,
           updated_at: image.updated_at,
-          src: image.path, // Add src field for compatibility
+          src: image.path,
         });
         return acc;
       }, {});
     }
 
-    // Format the response to match Laravel's pagination structure
     const last_page = Math.ceil(total / limit);
     const from = offset + 1;
     const to = Math.min(offset + limit, total);
@@ -665,7 +603,6 @@ exports.getProductsReport = async (req) => {
     const { keyword = "", per_page, page = 1, company_id } = req.query;
     const offset = per_page ? (page - 1) * per_page : 0;
 
-    // Base query for products with all necessary fields
     let query = `
       SELECT
         p.id, p.name, p.code, p.barcode_symbology_id, p.category_id,
@@ -681,17 +618,14 @@ exports.getProductsReport = async (req) => {
       LEFT JOIN images i ON i.imageable_id = p.id AND i.imageable_type = 'App\\\\Models\\\\Product'
     `;
 
-    // Add keyword filtering
     const queryParams = [];
     if (keyword) {
       query += ` WHERE p.name LIKE ? OR p.code LIKE ?`;
       queryParams.push(`%${keyword}%`, `%${keyword}%`);
     }
 
-    // Always sort by created_at DESC as requested
     query += ` ORDER BY p.created_at DESC`;
 
-    // Handle pagination
     if (per_page) {
       query += ` LIMIT ? OFFSET ?`;
       queryParams.push(parseInt(per_page), offset);
@@ -699,7 +633,6 @@ exports.getProductsReport = async (req) => {
 
     const [products] = await db.query(query, queryParams);
 
-    // Group images for each product
     const resultsMap = new Map();
 
     products.forEach((product) => {
@@ -731,7 +664,6 @@ exports.getProductsReport = async (req) => {
         resultsMap.set(product.id, productData);
       }
 
-      // Add image if exists
       if (product.image_id) {
         resultsMap.get(product.id).images.push({
           id: product.image_id,
@@ -753,9 +685,7 @@ exports.getProductsReport = async (req) => {
 
     const results = Array.from(resultsMap.values());
 
-    // Calculate purchased/sold quantities and amounts for each product
     for (const product of results) {
-      // Base queries with company filter if provided
       let purchasedQuery = `
         SELECT
           COALESCE(SUM(o.quantity), 0) as quantity,
@@ -784,13 +714,11 @@ exports.getProductsReport = async (req) => {
         soldQuery += ` AND s.company_id = ?`;
       }
 
-      // Execute queries
       const [purchasedResults, soldResults] = await Promise.all([
         db.query(purchasedQuery, company_id ? companyParams : queryParams),
         db.query(soldQuery, company_id ? companyParams : queryParams),
       ]);
 
-      // Update product with calculated values
       product.purchased_quantity = purchasedResults[0][0]?.quantity || 0;
       product.purchased_amount = purchasedResults[0][0]?.amount || 0;
       product.sold_quantity = soldResults[0][0]?.quantity || 0;
@@ -798,7 +726,6 @@ exports.getProductsReport = async (req) => {
       product.quantity = product.purchased_quantity - product.sold_quantity;
     }
 
-    // For paginated response
     if (per_page) {
       let countQuery = `SELECT COUNT(*) as total FROM products p`;
       const countParams = [];
@@ -811,7 +738,6 @@ exports.getProductsReport = async (req) => {
       const [[{ total }]] = await db.query(countQuery, countParams);
       const totalPages = Math.ceil(total / per_page);
 
-      // Helper function to generate pagination URLs
       const generateUrl = (pageNum) =>
         `${req.protocol}://${req.get("host")}${req.baseUrl}?page=${pageNum}`;
 
@@ -852,7 +778,6 @@ exports.getProductsReport = async (req) => {
       };
     }
 
-    // For non-paginated response
     return {
       status: "Success",
       data: results,
@@ -861,5 +786,244 @@ exports.getProductsReport = async (req) => {
   } catch (error) {
     console.error("Error in products report:", error);
     throw error;
+  }
+};
+
+exports.getExpiredPurchasesReport = async (filters) => {
+  try {
+    const values = [];
+    const filterConditions = [];
+
+    const page = parseInt(filters.page) || 1;
+    const perPage = parseInt(filters.per_page) || 15;
+
+    const keywordLike = filters.keyword ? `%${filters.keyword}%` : null;
+
+    if (keywordLike) {
+      const [companies, suppliers, stores] = await Promise.all([
+        db.query(`SELECT id FROM companies WHERE name LIKE ?`, [keywordLike]),
+        db.query(`SELECT id FROM suppliers WHERE company LIKE ?`, [
+          keywordLike,
+        ]),
+        db.query(`SELECT id FROM stores WHERE name LIKE ?`, [keywordLike]),
+      ]);
+
+      const companyIds = companies[0].map((c) => c.id);
+      const supplierIds = suppliers[0].map((s) => s.id);
+      const storeIds = stores[0].map((s) => s.id);
+
+      filterConditions.push(`(
+        p.reference_no LIKE ?
+        OR p.timestamp LIKE ?
+        OR p.grand_total LIKE ?
+        ${companyIds.length ? "OR p.company_id IN (?)" : ""}
+        ${supplierIds.length ? "OR p.supplier_id IN (?)" : ""}
+        ${storeIds.length ? "OR p.store_id IN (?)" : ""}
+      )`);
+
+      values.push(keywordLike, keywordLike, keywordLike);
+      if (companyIds.length) values.push(companyIds);
+      if (supplierIds.length) values.push(supplierIds);
+      if (storeIds.length) values.push(storeIds);
+    }
+
+    filterConditions.push("p.credit_days IS NOT NULL");
+
+    if (filters.company_id) {
+      filterConditions.push("p.company_id = ?");
+      values.push(filters.company_id);
+    }
+
+    if (filters.startDate && filters.endDate) {
+      if (filters.startDate === filters.endDate) {
+        filterConditions.push("DATE(p.expiry_date) = ?");
+        values.push(filters.startDate);
+      } else {
+        filterConditions.push("p.expiry_date BETWEEN ? AND ?");
+        values.push(filters.startDate, filters.endDate);
+      }
+    } else {
+      const from = "1970-01-01";
+      const to = new Date().toISOString().split("T")[0];
+      filterConditions.push("p.expiry_date BETWEEN ? AND ?");
+      values.push(from, to);
+    }
+
+    const whereClause = filterConditions.length
+      ? `WHERE ${filterConditions.join(" AND ")}`
+      : "";
+
+    const baseQuery = `
+      SELECT p.*
+      FROM purchases p
+      ${whereClause}
+      ORDER BY p.timestamp DESC
+    `;
+
+    const [rows] = await db.query(baseQuery, values);
+    const ids = rows.map((r) => r.id);
+
+    if (!ids.length) {
+      return {
+        status: "Success",
+        data: {
+          current_page: page,
+          data: [],
+          first_page_url: null,
+          from: 0,
+          last_page: 0,
+          last_page_url: null,
+          links: [],
+          next_page_url: null,
+          path: null,
+          per_page: perPage,
+          prev_page_url: null,
+          to: 0,
+          total: 0,
+        },
+        message: null,
+      };
+    }
+
+    const [paymentRows] = await db.query(
+      `SELECT paymentable_id AS id, SUM(amount) AS paid_amount
+       FROM payments
+       WHERE paymentable_type = 'App\\\\Models\\\\Purchase' AND paymentable_id IN (${ids
+         .map(() => "?")
+         .join(",")})
+       GROUP BY paymentable_id`,
+      ids
+    );
+
+    const paidMap = {};
+    for (const p of paymentRows) paidMap[p.id] = parseFloat(p.paid_amount || 0);
+
+    const unpaid = rows.filter(
+      (r) => parseFloat(r.grand_total || 0) > (paidMap[r.id] || 0)
+    );
+    const total = unpaid.length;
+    const lastPage = Math.ceil(total / perPage);
+    const offset = (page - 1) * perPage;
+    const paginated = unpaid.slice(offset, offset + perPage);
+
+    const companyIds = [...new Set(paginated.map((r) => r.company_id))];
+    const storeIds = [...new Set(paginated.map((r) => r.store_id))];
+    const supplierIds = [...new Set(paginated.map((r) => r.supplier_id))];
+    const userIds = [...new Set(paginated.map((r) => r.user_id))];
+
+    const [companies, stores, suppliers, users, orders] = await Promise.all([
+      db.query(
+        `SELECT id, name FROM companies WHERE id IN (${companyIds
+          .map(() => "?")
+          .join(",")})`,
+        companyIds
+      ),
+      db.query(
+        `SELECT id, name FROM stores WHERE id IN (${storeIds
+          .map(() => "?")
+          .join(",")})`,
+        storeIds
+      ),
+      db.query(
+        `SELECT * FROM suppliers WHERE id IN (${supplierIds
+          .map(() => "?")
+          .join(",")})`,
+        supplierIds
+      ),
+      db.query(
+        `SELECT * FROM users WHERE id IN (${userIds.map(() => "?").join(",")})`,
+        userIds
+      ),
+      db.query(
+        `SELECT * FROM orders WHERE orderable_type = 'App\\\\Models\\\\Purchase' AND orderable_id IN (${ids
+          .map(() => "?")
+          .join(",")})`,
+        ids
+      ),
+    ]);
+
+    const mapById = (items) => Object.fromEntries(items.map((i) => [i.id, i]));
+    const companyMap = mapById(companies[0]);
+    const storeMap = mapById(stores[0]);
+    const supplierMap = mapById(suppliers[0]);
+    const userMap = mapById(users[0]);
+
+    const orderMap = {};
+    for (const o of orders[0]) {
+      if (!orderMap[o.orderable_id]) orderMap[o.orderable_id] = [];
+      orderMap[o.orderable_id].push(o);
+    }
+
+    const enriched = paginated.map((row) => {
+      const user = userMap[row.user_id] || {};
+      const userCompany = user.company_id ? companyMap[user.company_id] : null;
+
+      return {
+        ...row,
+        paid_amount: paidMap[row.id] || 0,
+        total_amount: row.grand_total,
+        company: companyMap[row.company_id] || null,
+        store: storeMap[row.store_id] || null,
+        supplier: supplierMap[row.supplier_id] || null,
+        orders: orderMap[row.id] || [],
+        images: [],
+      };
+    });
+
+    const path = "/api/purchase/expired_purchases_report";
+    const baseUrl = `${process.env.APP_URL || "http://localhost"}${path}`;
+
+    const links = [
+      {
+        url:
+          page > 1 ? `${baseUrl}?page=${page - 1}&per_page=${perPage}` : null,
+        label: "&laquo; Anterior",
+        active: false,
+      },
+      {
+        url: `${baseUrl}?page=${page}&per_page=${perPage}`,
+        label: page.toString(),
+        active: true,
+      },
+      {
+        url:
+          page < lastPage
+            ? `${baseUrl}?page=${page + 1}&per_page=${perPage}`
+            : null,
+        label: "Siguiente &raquo;",
+        active: false,
+      },
+    ];
+
+    return {
+      status: "Success",
+      data: {
+        current_page: page,
+        data: enriched,
+        first_page_url: `${baseUrl}?page=1&per_page=${perPage}`,
+        from: offset + 1,
+        last_page: lastPage,
+        last_page_url: `${baseUrl}?page=${lastPage}&per_page=${perPage}`,
+        links,
+        next_page_url:
+          page < lastPage
+            ? `${baseUrl}?page=${page + 1}&per_page=${perPage}`
+            : null,
+        path: baseUrl,
+        per_page: perPage,
+        prev_page_url:
+          page > 1 ? `${baseUrl}?page=${page - 1}&per_page=${perPage}` : null,
+        to: Math.min(offset + perPage, total),
+        total,
+      },
+      message: null,
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "Error",
+      message: "Failed to fetch expired purchases report",
+      data: null,
+    };
   }
 };
