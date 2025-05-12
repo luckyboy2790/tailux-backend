@@ -1143,7 +1143,8 @@ exports.getSalesReport = async (req) => {
 
       const [orders] = await db.query(
         `
-        SELECT o.*, p.*
+        SELECT o.*, p.id as product_id, p.name as product_name, p.code as product_code,
+               p.price as product_price, p.cost as product_cost, p.unit as product_unit
         FROM orders o
         LEFT JOIN products p ON o.product_id = p.id
         WHERE o.orderable_id = ? AND o.orderable_type = 'App\\\\Models\\\\Sale'
@@ -1152,13 +1153,15 @@ exports.getSalesReport = async (req) => {
       );
 
       sale.orders = orders.map((order) => {
-        const product = {};
-        for (const key in order) {
-          if (key.startsWith("product_")) {
-            product[key.replace("product_", "")] = order[key];
-            delete order[key];
-          }
-        }
+        const product = {
+          id: order.product_id,
+          name: order.product_name,
+          code: order.product_code,
+          price: order.product_price,
+          cost: order.product_cost,
+          unit: order.product_unit,
+        };
+
         order.product = product;
         return order;
       });
