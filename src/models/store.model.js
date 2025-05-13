@@ -1,0 +1,148 @@
+const db = require("../config/db");
+
+exports.searchStores = async (req) => {
+  try {
+    const values = [];
+    const filterConditions = [];
+
+    if (req.query.keyword && req.query.keyword !== "") {
+      filterConditions.push("(s.name LIKE ? OR c.name LIKE ?)");
+      const keywordLike = `%${req.query.keyword}%`;
+      values.push(keywordLike, keywordLike);
+    }
+
+    const whereClause = filterConditions.length
+      ? `WHERE ${filterConditions.join(" AND ")}`
+      : "";
+
+    const perPage = parseInt(req.query.per_page) || 15;
+    const page = parseInt(req.query.page) || 1;
+    const offset = (page - 1) * perPage;
+
+    // Count total records
+    const countQuery = `SELECT COUNT(*) AS total FROM stores s LEFT JOIN companies c ON c.id = s.company_id ${whereClause}`;
+    const [countResult] = await db.query(countQuery, values);
+    const total = countResult[0]?.total || 0;
+
+    // Get paginated data
+    const dataQuery = `
+      SELECT
+        s.*,
+        c.id AS company_id,
+        c.name AS company_name,
+        c.created_at AS company_created_at,
+        c.updated_at AS company_updated_at
+      FROM stores s
+      LEFT JOIN companies c ON c.id = s.company_id
+      ${whereClause}
+      LIMIT ? OFFSET ?
+    `;
+    const dataValues = [...values, perPage, offset];
+    const [stores] = await db.query(dataQuery, dataValues);
+
+    // Format the response to match Laravel's paginator
+    const totalPages = Math.ceil(total / perPage);
+    const from = offset + 1;
+    const to = Math.min(offset + perPage, total);
+
+    const links = [];
+    if (page > 1) {
+      links.push({
+        url: `${req.query.baseUrl || ""}?page=${
+          page - 1
+        }&per_page=${perPage}&keyword=${req.query.keyword || ""}`,
+        label: "&laquo; Previous",
+        active: false,
+      });
+    } else {
+      links.push({
+        url: null,
+        label: "&laquo; Previous",
+        active: false,
+      });
+    }
+
+    for (let i = 1; i <= totalPages; i++) {
+      links.push({
+        url: `${
+          req.query.baseUrl || ""
+        }?page=${i}&per_page=${perPage}&keyword=${req.query.keyword || ""}`,
+        label: i.toString(),
+        active: i === page,
+      });
+    }
+
+    if (page < totalPages) {
+      links.push({
+        url: `${req.query.baseUrl || ""}?page=${
+          page + 1
+        }&per_page=${perPage}&keyword=${req.query.keyword || ""}`,
+        label: "Next &raquo;",
+        active: false,
+      });
+    } else {
+      links.push({
+        url: null,
+        label: "Next &raquo;",
+        active: false,
+      });
+    }
+
+    const response = {
+      status: "Success",
+      data: {
+        current_page: page,
+        data: stores.map((store) => ({
+          id: store.id,
+          name: store.name,
+          company_id: store.company_id,
+          created_at: store.created_at,
+          updated_at: store.updated_at,
+          company: {
+            id: store.company_id,
+            name: store.company_name,
+            created_at: store.company_created_at,
+            updated_at: store.company_updated_at,
+          },
+        })),
+        first_page_url: `${
+          req.query.baseUrl || ""
+        }?page=1&per_page=${perPage}&keyword=${req.query.keyword || ""}`,
+        from,
+        last_page: totalPages,
+        last_page_url: `${
+          req.query.baseUrl || ""
+        }?page=${totalPages}&per_page=${perPage}&keyword=${
+          req.query.keyword || ""
+        }`,
+        links,
+        next_page_url:
+          page < totalPages
+            ? `${req.query.baseUrl || ""}?page=${
+                page + 1
+              }&per_page=${perPage}&keyword=${req.query.keyword || ""}`
+            : null,
+        path: req.query.baseUrl || "",
+        per_page: perPage,
+        prev_page_url:
+          page > 1
+            ? `${req.query.baseUrl || ""}?page=${
+                page - 1
+              }&per_page=${perPage}&keyword=${req.query.keyword || ""}`
+            : null,
+        to,
+        total,
+      },
+      message: null,
+    };
+
+    return response;
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "Error",
+      message: "Failed to fetch stores",
+      data: null,
+    };
+  }
+};

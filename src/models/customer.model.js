@@ -18,12 +18,12 @@ exports.findAll = async () => {
   }
 };
 
-exports.searchCustomers = async (filters) => {
+exports.searchCustomers = async (req) => {
   try {
     const values = [];
     const filterConditions = [];
 
-    if (filters.keyword) {
+    if (req.query.keyword) {
       filterConditions.push(`(
         name LIKE ?
         OR company LIKE ?
@@ -32,7 +32,7 @@ exports.searchCustomers = async (filters) => {
         OR address LIKE ?
         OR city LIKE ?
       )`);
-      const keywordLike = `%${filters.keyword}%`;
+      const keywordLike = `%${req.query.keyword}%`;
       values.push(
         keywordLike,
         keywordLike,
@@ -47,8 +47,8 @@ exports.searchCustomers = async (filters) => {
       ? `WHERE ${filterConditions.join(" AND ")}`
       : "";
 
-    const perPage = parseInt(filters.per_page) || 15;
-    const page = parseInt(filters.page) || 1;
+    const perPage = parseInt(req.query.per_page) || 15;
+    const page = parseInt(req.query.page) || 1;
     const offset = (page - 1) * perPage;
 
     // Count total records
