@@ -2304,3 +2304,187 @@ exports.getSuppliersReport = async (filters) => {
     };
   }
 };
+
+exports.getUsersReport = async (filters) => {
+  try {
+    const values = [];
+    const filterConditions = [];
+
+    // Company filter
+    if (filters.company_id) {
+      filterConditions.push("u.company_id LIKE ?");
+      values.push(`%${filters.company_id}%`);
+    }
+
+    // Keyword search
+    if (filters.keyword) {
+      const keyword = `%${filters.keyword}%`;
+      filterConditions.push(`(
+        u.username LIKE ? OR
+        u.first_name LIKE ? OR
+        u.last_name LIKE ? OR
+        u.email LIKE ? OR
+        u.phone_number LIKE ?
+      )`);
+      values.push(keyword, keyword, keyword, keyword, keyword);
+    }
+
+    const whereClause = filterConditions.length
+      ? `WHERE ${filterConditions.join(" AND ")}`
+      : "";
+
+    // Pagination
+    const perPage = parseInt(filters.per_page) || 15;
+    const page = parseInt(filters.page) || 1;
+    const offset = (page - 1) * perPage;
+
+    // Count total users
+    const countQuery = `SELECT COUNT(*) AS total FROM users u ${whereClause}`;
+    const [countResult] = await db.query(countQuery, values);
+    const total = countResult[0]?.total || 0;
+
+    // Get users with pagination
+    const usersQuery = `
+      SELECT
+        u.*,
+        c.id AS company_id,
+        c.name AS company_name,
+        c.created_at AS company_created_at,
+        c.updated_at AS company_updated_at,
+        (
+          SELECT id FROM stores WHERE company_id = u.company_id LIMIT 1
+        ) AS first_store_id
+      FROM users u
+      LEFT JOIN companies c ON c.id = u.company_id
+      ${whereClause}
+      ORDER BY u.created_at DESC
+      LIMIT ? OFFSET ?
+    `;
+
+    const userValues = [...values, perPage, offset];
+    const [users] = await db.query(usersQuery, userValues);
+
+    // Generate photo URLs and names
+    const enrichedUsers = users.map((user) => {
+      const name =
+        [user.first_name, user.last_name].filter(Boolean).join(" ") ||
+        user.username;
+
+      return {
+        ...user,
+        name: name,
+        company: user.company_id
+          ? {
+              id: user.company_id,
+              name: user.company_name,
+              created_at: user.company_created_at,
+              updated_at: user.company_updated_at,
+            }
+          : null,
+      };
+    });
+
+    // Calculate pagination metadata
+    const totalPages = Math.ceil(total / perPage);
+    const baseUrl = `${process.env.APP_URL}/api/report/users_report`;
+
+    const pagination = {
+      current_page: page,
+      data: enrichedUsers,
+      first_page_url: `${baseUrl}?page=1`,
+      from: offset + 1,
+      last_page: totalPages,
+      last_page_url: `${baseUrl}?page=${totalPages}`,
+      links: generatePaginationLinks(page, totalPages, baseUrl),
+      next_page_url: page < totalPages ? `${baseUrl}?page=${page + 1}` : null,
+      path: baseUrl,
+      per_page: perPage,
+      prev_page_url: page > 1 ? `${baseUrl}?page=${page - 1}` : null,
+      to: Math.min(offset + perPage, total),
+      total: total,
+    };
+
+    return {
+      status: "Success",
+      data: pagination,
+      message: null,
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "Error",
+      message: "Failed to fetch users report",
+      data: null,
+    };
+  }
+};
+
+// Helper function to generate pagination links
+function generatePaginationLinks(currentPage, totalPages, baseUrl) {
+  const links = [];
+
+  // Previous link
+  links.push({
+    url: currentPage > 1 ? `${baseUrl}?page=${currentPage - 1}` : null,
+    label: "&laquo; Anterior",
+    active: false,
+  });
+
+  // Always show first page
+  if (totalPages > 0) {
+    links.push({
+      url: `${baseUrl}?page=1`,
+      label: "1",
+      active: currentPage === 1,
+    });
+  }
+
+  // Calculate window of pages around current page
+  let startPage = Math.max(2, currentPage - 2);
+  let endPage = Math.min(totalPages - 1, currentPage + 2);
+
+  // Add ellipsis if needed after first page
+  if (startPage > 2) {
+    links.push({
+      url: null,
+      label: "...",
+      active: false,
+    });
+  }
+
+  // Add page numbers in window
+  for (let i = startPage; i <= endPage; i++) {
+    links.push({
+      url: `${baseUrl}?page=${i}`,
+      label: i.toString(),
+      active: i === currentPage,
+    });
+  }
+
+  // Add ellipsis if needed before last page
+  if (endPage < totalPages - 1) {
+    links.push({
+      url: null,
+      label: "...",
+      active: false,
+    });
+  }
+
+  // Always show last page if there's more than one page
+  if (totalPages > 1) {
+    links.push({
+      url: `${baseUrl}?page=${totalPages}`,
+      label: totalPages.toString(),
+      active: currentPage === totalPages,
+    });
+  }
+
+  // Next link
+  links.push({
+    url: currentPage < totalPages ? `${baseUrl}?page=${currentPage + 1}` : null,
+    label: "Siguiente &raquo;",
+    active: false,
+  });
+
+  return links;
+}
