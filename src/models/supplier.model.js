@@ -17,3 +17,232 @@ exports.findAll = async () => {
     };
   }
 };
+
+exports.searchSuppliers = async (req) => {
+  try {
+    const values = [];
+    const filterConditions = [];
+
+    // Keyword search
+    if (req.query.keyword) {
+      filterConditions.push(`(
+        name LIKE ?
+        OR company LIKE ?
+        OR email LIKE ?
+        OR phone_number LIKE ?
+        OR address LIKE ?
+        OR city LIKE ?
+      )`);
+      const keywordLike = `%${req.query.keyword}%`;
+      values.push(
+        keywordLike,
+        keywordLike,
+        keywordLike,
+        keywordLike,
+        keywordLike,
+        keywordLike
+      );
+    }
+
+    const whereClause = filterConditions.length
+      ? `WHERE ${filterConditions.join(" AND ")}`
+      : "";
+
+    // Pagination
+    const perPage = parseInt(req.query.per_page) || 15;
+    const page = parseInt(req.query.page) || 1;
+    const offset = (page - 1) * perPage;
+
+    // Count query
+    const countQuery = `SELECT COUNT(*) AS total FROM suppliers ${whereClause}`;
+    const [countResult] = await db.query(countQuery, values);
+    const total = countResult[0]?.total || 0;
+
+    // Main query
+    const supplierQuery = `
+      SELECT * FROM suppliers
+      ${whereClause}
+      ORDER BY created_at DESC
+      LIMIT ? OFFSET ?
+    `;
+    const supplierValues = [...values, perPage, offset];
+    const [supplierRows] = await db.query(supplierQuery, supplierValues);
+    const supplierIds = supplierRows.map((r) => r.id);
+
+    if (!supplierIds.length) {
+      return {
+        status: "Success",
+        data: {
+          current_page: page,
+          per_page: perPage,
+          total,
+          total_pages: Math.ceil(total / perPage),
+          data: [],
+        },
+        message: null,
+      };
+    }
+
+    // Get purchase stats for each supplier
+    const [purchaseStats] = await db.query(
+      `
+      SELECT
+        supplier_id,
+        COUNT(*) AS total_purchases,
+        SUM(CASE WHEN status = 1 THEN grand_total ELSE 0 END) AS total_amount
+      FROM purchases
+      WHERE supplier_id IN (${supplierIds.map(() => "?").join(",")})
+      GROUP BY supplier_id
+    `,
+      supplierIds
+    );
+
+    // Get payment stats for each supplier
+    const [paymentStats] = await db.query(
+      `
+      SELECT
+        p.supplier_id,
+        SUM(py.amount) AS paid_amount
+      FROM purchases p
+      JOIN payments py ON py.paymentable_id = p.id AND py.paymentable_type = 'App\\\\Models\\\\Purchase'
+      WHERE p.supplier_id IN (${supplierIds.map(() => "?").join(",")})
+        AND p.status = 1
+      GROUP BY p.supplier_id
+    `,
+      supplierIds
+    );
+
+    // Get return stats for each supplier
+    const [returnStats] = await db.query(
+      `
+      SELECT
+        p.supplier_id,
+        SUM(pr.amount) AS returned_amount
+      FROM purchases p
+      JOIN preturns pr ON pr.purchase_id = p.id
+      WHERE p.supplier_id IN (${supplierIds.map(() => "?").join(",")})
+        AND p.status = 1
+        AND pr.status = 1
+      GROUP BY p.supplier_id
+    `,
+      supplierIds
+    );
+
+    // Create maps for quick lookup
+    const purchaseMap = {};
+    purchaseStats.forEach((stat) => {
+      purchaseMap[stat.supplier_id] = {
+        total_purchases: stat.total_purchases,
+        total_amount: stat.total_amount || 0,
+      };
+    });
+
+    const paymentMap = {};
+    paymentStats.forEach((stat) => {
+      paymentMap[stat.supplier_id] = {
+        paid_amount: stat.paid_amount || 0,
+      };
+    });
+
+    const returnMap = {};
+    returnStats.forEach((stat) => {
+      returnMap[stat.supplier_id] = {
+        returned_amount: stat.returned_amount || 0,
+      };
+    });
+
+    // Enrich supplier data with stats
+    const enriched = supplierRows.map((supplier) => {
+      const purchaseData = purchaseMap[supplier.id] || {
+        total_purchases: 0,
+        total_amount: 0,
+      };
+      const paymentData = paymentMap[supplier.id] || { paid_amount: 0 };
+      const returnData = returnMap[supplier.id] || { returned_amount: 0 };
+
+      // Calculate final total amount (subtracting returns)
+      const finalTotalAmount =
+        purchaseData.total_amount - returnData.returned_amount;
+
+      return {
+        ...supplier,
+        total_purchases: purchaseData.total_purchases,
+        total_amount: finalTotalAmount,
+        paid_amount: paymentData.paid_amount,
+        created_at: supplier.created_at.toISOString(),
+        updated_at: supplier.updated_at.toISOString(),
+      };
+    });
+
+    // Generate pagination links
+    const totalPages = Math.ceil(total / perPage);
+    const baseUrl = `${process.env.APP_URL}/api/supplier/search`;
+
+    const links = [];
+    links.push({
+      url: page > 1 ? `${baseUrl}?page=${page - 1}` : null,
+      label: "&laquo; Anterior",
+      active: false,
+    });
+
+    // Add page links (simplified version - you may want to implement more complex pagination)
+    for (let i = 1; i <= Math.min(10, totalPages); i++) {
+      links.push({
+        url: `${baseUrl}?page=${i}`,
+        label: i.toString(),
+        active: i === page,
+      });
+    }
+
+    if (totalPages > 10) {
+      links.push({
+        url: null,
+        label: "...",
+        active: false,
+      });
+      links.push({
+        url: `${baseUrl}?page=${totalPages - 1}`,
+        label: (totalPages - 1).toString(),
+        active: false,
+      });
+      links.push({
+        url: `${baseUrl}?page=${totalPages}`,
+        label: totalPages.toString(),
+        active: false,
+      });
+    }
+
+    links.push({
+      url: page < totalPages ? `${baseUrl}?page=${page + 1}` : null,
+      label: "Siguiente &raquo;",
+      active: false,
+    });
+
+    return {
+      status: "Success",
+      data: {
+        current_page: page,
+        data: enriched,
+        first_page_url: `${baseUrl}?page=1`,
+        from: (page - 1) * perPage + 1,
+        last_page: totalPages,
+        last_page_url: `${baseUrl}?page=${totalPages}`,
+        links: links,
+        next_page_url: page < totalPages ? `${baseUrl}?page=${page + 1}` : null,
+        path: baseUrl,
+        per_page: perPage,
+        prev_page_url: page > 1 ? `${baseUrl}?page=${page - 1}` : null,
+        to: Math.min(page * perPage, total),
+        total: total,
+      },
+      message: null,
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "Error",
+      message: "Failed to fetch suppliers",
+      data: null,
+    };
+  }
+};
