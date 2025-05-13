@@ -18,3 +18,13 @@ exports.getSupplierSearch = async (req, res) => {
     res.status(500).json({ error: "Server Error" });
   }
 };
+
+exports.getPurchases = async (req, res) => {
+  try {
+    const purchases = await Supplier.getPurchases(req);
+
+    res.json(purchases);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};

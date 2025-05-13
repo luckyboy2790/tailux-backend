@@ -246,3 +246,176 @@ exports.searchSuppliers = async (req) => {
     };
   }
 };
+
+exports.getPurchases = async (req) => {
+  try {
+    const { supplier_id } = req.query;
+
+    // First get the supplier
+    const [supplierRows] = await db.query(
+      `SELECT * FROM suppliers WHERE id = ?`,
+      [supplier_id]
+    );
+
+    if (supplierRows.length === 0) {
+      return {
+        status: "Error",
+        message: "Supplier not found",
+        data: null,
+      };
+    }
+
+    const supplier = supplierRows[0];
+
+    // Get supplier statistics
+    const [purchaseCount] = await db.query(
+      `SELECT COUNT(*) as total_purchases FROM purchases
+       WHERE supplier_id = ? AND status = 1`,
+      [supplier_id]
+    );
+
+    const [totalAmount] = await db.query(
+      `SELECT SUM(grand_total) as total_amount FROM purchases
+       WHERE supplier_id = ? AND status = 1`,
+      [supplier_id]
+    );
+
+    const [paidAmount] = await db.query(
+      `SELECT SUM(amount) as paid_amount FROM payments
+       WHERE paymentable_type = 'App\\\\Models\\\\Purchase'
+       AND paymentable_id IN (
+         SELECT id FROM purchases WHERE supplier_id = ? AND status = 1
+       )`,
+      [supplier_id]
+    );
+
+    // Add calculated fields to supplier
+    supplier.total_purchases = purchaseCount[0].total_purchases || 0;
+    supplier.total_amount = totalAmount[0].total_amount || 0;
+    supplier.paid_amount = paidAmount[0].paid_amount || 0;
+
+    // Now get the purchases
+    const filterConditions = ["p.status = 1", "p.supplier_id = ?"];
+    const values = [supplier_id];
+
+    const whereClause = filterConditions.length
+      ? `WHERE ${filterConditions.join(" AND ")}`
+      : "";
+
+    // Get purchases with outstanding balance (total_amount > paid_amount)
+    const purchaseQuery = `
+      SELECT p.*,
+        SUM(py.amount) as paid_amount,
+        p.grand_total as total_amount,
+        0 as returned_amount,
+        c.id as company_id,
+        c.name as company_name,
+        s.id as store_id,
+        s.name as store_name
+      FROM purchases p
+      LEFT JOIN payments py ON py.paymentable_id = p.id
+        AND py.paymentable_type = 'App\\\\Models\\\\Purchase'
+      LEFT JOIN companies c ON c.id = p.company_id
+      LEFT JOIN stores s ON s.id = p.store_id
+      ${whereClause}
+      GROUP BY p.id
+      HAVING total_amount > IFNULL(paid_amount, 0)
+      ORDER BY p.timestamp DESC
+    `;
+
+    const [purchases] = await db.query(purchaseQuery, values);
+
+    if (purchases.length === 0) {
+      return {
+        status: "Success",
+        data: {
+          data: [],
+          supplier: supplier,
+        },
+        message: null,
+      };
+    }
+
+    const purchaseIds = purchases.map((p) => p.id);
+
+    // Get orders for these purchases
+    const [orders] = await db.query(
+      `SELECT o.*,
+         pr.id as product_id,
+         pr.name as product_name,
+         pr.code as product_code,
+         pr.unit as product_unit,
+         pr.cost as product_cost,
+         pr.price as product_price,
+         pr.alert_quantity as product_alert_quantity
+       FROM orders o
+       LEFT JOIN products pr ON pr.id = o.product_id
+       WHERE o.orderable_type = 'App\\\\Models\\\\Purchase'
+       AND o.orderable_id IN (?)`,
+      [purchaseIds]
+    );
+
+    // Group orders by purchase_id
+    const orderMap = {};
+    orders.forEach((order) => {
+      if (!orderMap[order.orderable_id]) {
+        orderMap[order.orderable_id] = [];
+      }
+      orderMap[order.orderable_id].push({
+        ...order,
+        product: {
+          id: order.product_id,
+          name: order.product_name,
+          code: order.product_code,
+          unit: order.product_unit,
+          cost: order.product_cost,
+          price: order.product_price,
+          alert_quantity: order.product_alert_quantity,
+        },
+      });
+    });
+
+    // Format the response
+    const formattedPurchases = purchases.map((purchase) => ({
+      ...purchase,
+      company: {
+        id: purchase.company_id,
+        name: purchase.company_name,
+        created_at: null,
+        updated_at: null,
+      },
+      store: {
+        id: purchase.store_id,
+        name: purchase.store_name,
+        company_id: purchase.company_id,
+        created_at: null,
+        updated_at: null,
+        company: {
+          id: purchase.company_id,
+          name: purchase.company_name,
+          created_at: null,
+          updated_at: null,
+        },
+      },
+      orders: orderMap[purchase.id] || [],
+      paid_amount: purchase.paid_amount || 0,
+      returned_amount: purchase.returned_amount || 0,
+    }));
+
+    return {
+      status: "Success",
+      data: {
+        data: formattedPurchases,
+        supplier: supplier,
+      },
+      message: null,
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "Error",
+      message: "Failed to fetch purchases",
+      data: null,
+    };
+  }
+};
