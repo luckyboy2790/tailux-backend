@@ -174,7 +174,7 @@ exports.searchPurchases = async (filters) => {
 
       return {
         ...row,
-        total_amount: row.grand_total,
+        total_amount: row.grand_total - totalReturned,
         user: {
           id: row.user_id,
           username: row.user_username,

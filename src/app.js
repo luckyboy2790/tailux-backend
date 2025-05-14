@@ -29,6 +29,7 @@ const receivedOrderRoutes = require("./routes/receivedOrder.routes");
 const reportRoutes = require("./routes/report.routes");
 const storeRoutes = require("./routes/store.routes");
 const siteSettingRoutes = require("./routes/siteSetting.route");
+const preturnRoutes = require("./routes/preturn.routes");
 
 app.use("/api/users", userRoutes);
 app.use("/api/dashboard", dashboardRoutes);
@@ -44,5 +45,6 @@ app.use("/api/recieved_order", receivedOrderRoutes);
 app.use("/api/report", reportRoutes);
 app.use("/api/store", storeRoutes);
 app.use("/api/site_setting", siteSettingRoutes);
+app.use("/api/preturn", preturnRoutes);
 
 module.exports = app;
