@@ -1,7 +1,8 @@
 const express = require("express");
 const router = express.Router();
-const pyamentController = require("../controllers/payment.controller");
+const paymentController = require("../controllers/payment.controller");
 
-router.get("/search_pending", pyamentController.getPendingPaymentSearch);
+router.get("/search_pending", paymentController.getPendingPaymentSearch);
+router.post("/create", paymentController.createPayment);
 
 module.exports = router;

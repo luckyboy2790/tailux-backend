@@ -1,4 +1,9 @@
+const moment = require("moment");
 const db = require("../config/db");
+const { putObject } = require("../utils/putObject");
+const slugify = require("slugify");
+const { v4 } = require("uuid");
+const path = require("path");
 
 exports.searchPending = async (req, res) => {
   try {
@@ -199,5 +204,106 @@ exports.searchPending = async (req, res) => {
       status: "Error",
       message: "Internal server error",
     };
+  }
+};
+
+exports.create = async (req) => {
+  try {
+    const {
+      date,
+      reference_no,
+      type,
+      paymentable_id,
+      amount = 0,
+      note = "",
+    } = req.body;
+
+    if (!date || !reference_no || !type || !paymentable_id) {
+      throw new Error(
+        "Missing required fields: date, reference_no, type, or paymentable_id"
+      );
+    }
+
+    const timestamp = moment(date).format("YYYY-MM-DD HH:mm:ss");
+    const paymentableType =
+      type === "purchase" ? "App\\Models\\Purchase" : "App\\Models\\Sale";
+
+    // Check duplicate reference_no for same paymentable
+    const [existing] = await db.query(
+      `SELECT id FROM payments WHERE reference_no = ? AND paymentable_id = ? AND paymentable_type = ?`,
+      [reference_no, paymentable_id, paymentableType]
+    );
+
+    if (existing.length > 0) {
+      throw Error("Reference number already taken");
+    }
+
+    const paymentableQuery =
+      type === "purchase"
+        ? `SELECT s.company, c.name as company_name FROM purchases p
+           LEFT JOIN suppliers s ON p.supplier_id = s.id
+           LEFT JOIN companies c ON p.company_id = c.id
+           WHERE p.id = ?`
+        : `SELECT c.company, co.name as company_name FROM sales s
+           LEFT JOIN customers c ON s.customer_id = c.id
+           LEFT JOIN companies co ON s.company_id = co.id
+           WHERE s.id = ?`;
+
+    const [rows] = await db.query(paymentableQuery, [paymentable_id]);
+
+    if (rows.length === 0) {
+      throw Error("Paymentable entity not found");
+    }
+
+    const paymentableCompany = slugify(rows[0].company || "", { lower: true });
+    const companyName = rows[0].company_name || "UnknownCompany";
+
+    const userRole = req.user?.role || "user";
+
+    // Insert payment
+    const [paymentResult] = await db.query(
+      `INSERT INTO payments (timestamp, reference_no, amount, paymentable_id, paymentable_type, note, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        timestamp,
+        reference_no,
+        amount,
+        paymentable_id,
+        paymentableType,
+        note,
+        userRole !== "secretary" ? 1 : 0,
+      ]
+    );
+
+    const paymentId = paymentResult.insertId;
+
+    // Upload attachments if any
+    if (req.files && req.files.attachment) {
+      const attachments = Array.isArray(req.files.attachment)
+        ? req.files.attachment
+        : [req.files.attachment];
+
+      for (let i = 0; i < attachments.length; i++) {
+        const file = attachments[i];
+        const ext = path.extname(file.name);
+
+        const attachName = `images/payments/${companyName}_${reference_no}_${paymentable_id}_${paymentableCompany}_${v4()}${ext}`;
+
+        const { key } = await putObject(file.data, attachName);
+
+        await db.query(
+          `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at)
+           VALUES (?, ?, ?, NOW(), NOW())`,
+          [`${key}`, paymentId, "App\\Models\\Payment"]
+        );
+      }
+    }
+
+    return {
+      status: "success",
+      payment_id: paymentId,
+    };
+  } catch (error) {
+    console.error(error);
   }
 };
