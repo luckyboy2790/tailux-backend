@@ -269,7 +269,6 @@ exports.searchPendingPurchases = async (req) => {
       per_page = 15,
     } = req.query;
 
-    // Base query
     let query = `
       SELECT
         p.*,
@@ -303,7 +302,6 @@ exports.searchPendingPurchases = async (req) => {
       WHERE p.status = 0
     `;
 
-    // Add filters based on request parameters
     const params = [];
 
     if (company_id) {
@@ -356,29 +354,22 @@ exports.searchPendingPurchases = async (req) => {
       }
     }
 
-    // Group by purchase id
     query += ` GROUP BY p.id`;
 
-    // Add sorting
     query += ` ORDER BY p.timestamp ${sort_by_date === "asc" ? "ASC" : "DESC"}`;
 
-    // Count total records for pagination
     const countQuery = `SELECT COUNT(*) as total FROM (${query}) AS total_purchases`;
     const [countResult] = await db.query(countQuery, params);
     const total = countResult[0].total;
     const totalPages = Math.ceil(total / per_page);
 
-    // Add pagination
     const offset = (page - 1) * per_page;
     query += ` LIMIT ? OFFSET ?`;
     params.push(parseInt(per_page), offset);
 
-    // Execute main query
     const [purchases] = await db.query(query, params);
 
-    // Get related data for each purchase
     for (const purchase of purchases) {
-      // Get orders
       const [orders] = await db.query(
         `
         SELECT o.*,
@@ -408,7 +399,6 @@ exports.searchPendingPurchases = async (req) => {
         },
       }));
 
-      // Get payments
       const [payments] = await db.query(
         `
         SELECT * FROM payments
@@ -418,7 +408,6 @@ exports.searchPendingPurchases = async (req) => {
       );
       purchase.payments = payments;
 
-      // Get returns
       const [preturns] = await db.query(
         `
         SELECT * FROM preturns
@@ -428,7 +417,6 @@ exports.searchPendingPurchases = async (req) => {
       );
       purchase.preturns = preturns;
 
-      // Get images
       const [images] = await db.query(
         `
         SELECT *,
@@ -441,7 +429,6 @@ exports.searchPendingPurchases = async (req) => {
       );
       purchase.images = images;
 
-      // Add nested objects for relationships
       purchase.company = {
         id: purchase.company_id,
         name: purchase.company_name,
@@ -499,5 +486,83 @@ exports.searchPendingPurchases = async (req) => {
   } catch (error) {
     console.error("Error in searchPending:", error);
     throw error;
+  }
+};
+
+exports.getPurchaseDetail = async (req) => {
+  try {
+    const { purchaseId } = req.query;
+
+    const [purchaseRows] = await db.query(
+      `
+      SELECT * FROM purchases WHERE id = ?
+    `,
+      [purchaseId]
+    );
+
+    if (purchaseRows.length === 0) {
+      throw new Error("Purchase not found");
+    }
+
+    const purchase = purchaseRows[0];
+
+    const [
+      [userRows],
+      [ordersRows],
+      [paymentsRows],
+      [preturnsRows],
+      [imagesRows],
+      [companyRows],
+      [supplierRows],
+      [storeRows],
+    ] = await Promise.all([
+      db.query(`SELECT * FROM users WHERE id = ?`, [purchase.user_id]),
+      db.query(
+        `SELECT * FROM orders WHERE orderable_id = ? AND orderable_type = 'App\\Models\\Purchase'`,
+        [purchaseId]
+      ),
+      db.query(
+        `SELECT * FROM payments WHERE paymentable_id = ? AND paymentable_type = 'App\\Models\\Purchase'`,
+        [purchaseId]
+      ),
+      db.query(`SELECT * FROM preturns WHERE purchase_id = ?`, [purchaseId]),
+      db.query(
+        `SELECT * FROM images WHERE imageable_id = ? AND imageable_type = 'App\\Models\\Purchase'`,
+        [purchaseId]
+      ),
+      db.query(`SELECT * FROM companies WHERE id = ?`, [purchase.company_id]),
+      db.query(`SELECT * FROM suppliers WHERE id = ?`, [purchase.supplier_id]),
+      db.query(`SELECT * FROM stores WHERE id = ?`, [purchase.store_id]),
+    ]);
+
+    const returnedAmount = preturnsRows
+      .filter((item) => item.status === 1)
+      .reduce((sum, item) => sum + (item.amount || 0), 0);
+
+    const paidAmount = paymentsRows
+      .filter((item) => item.status === 1)
+      .reduce((sum, item) => sum + (item.amount || 0), 0);
+
+    const totalAmount = (purchase.grand_total || 0) - returnedAmount;
+
+    purchase.user = userRows[0] || null;
+    purchase.orders = ordersRows;
+    purchase.payments = paymentsRows;
+    purchase.preturns = preturnsRows;
+    purchase.images = imagesRows;
+    purchase.company = companyRows[0] || null;
+    purchase.supplier = supplierRows[0] || null;
+    purchase.store = storeRows[0] || null;
+
+    purchase.total_amount = totalAmount;
+    purchase.paid_amount = paidAmount;
+    purchase.returned_amount = returnedAmount;
+
+    return {
+      status: "success",
+      data: purchase,
+    };
+  } catch (error) {
+    console.error(error);
   }
 };

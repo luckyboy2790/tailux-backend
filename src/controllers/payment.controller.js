@@ -18,3 +18,13 @@ exports.createPayment = async (req, res) => {
     console.error(error);
   }
 };
+
+exports.searchPayments = async (req, res) => {
+  try {
+    const payments = await Payment.search(req);
+
+    res.json(payments);
+  } catch (error) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};

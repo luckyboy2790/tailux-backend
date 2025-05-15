@@ -69,7 +69,6 @@ exports.searchPending = async (req, res) => {
     const limit = parseInt(per_page);
     const offset = (parseInt(page) - 1) * limit;
 
-    // Get total count with all filters applied
     const [countResult] = await db.query(countQuery, countParams);
     const total = countResult[0].total;
 
@@ -79,7 +78,6 @@ exports.searchPending = async (req, res) => {
     const [payments] = await db.query(query, params);
     const paymentIds = payments.map((p) => p.id);
 
-    // Load images
     let images = [];
     if (paymentIds.length > 0) {
       const [imageResults] = await db.query(
@@ -91,10 +89,8 @@ exports.searchPending = async (req, res) => {
       images = imageResults;
     }
 
-    // Load paymentable data
     const paymentableData = {};
 
-    // Load purchases
     const purchaseIds = payments
       .filter((p) => p.paymentable_type === "App\\Models\\Purchase")
       .map((p) => p.paymentable_id);
@@ -112,7 +108,6 @@ exports.searchPending = async (req, res) => {
       });
     }
 
-    // Load sales
     const saleIds = payments
       .filter((p) => p.paymentable_type === "App\\Models\\Sale")
       .map((p) => p.paymentable_id);
@@ -130,7 +125,6 @@ exports.searchPending = async (req, res) => {
       });
     }
 
-    // Combine all data
     const data = payments.map((payment) => {
       const paymentWithRelations = { ...payment };
 
@@ -228,7 +222,6 @@ exports.create = async (req) => {
     const paymentableType =
       type === "purchase" ? "App\\Models\\Purchase" : "App\\Models\\Sale";
 
-    // Check duplicate reference_no for same paymentable
     const [existing] = await db.query(
       `SELECT id FROM payments WHERE reference_no = ? AND paymentable_id = ? AND paymentable_type = ?`,
       [reference_no, paymentable_id, paymentableType]
@@ -260,7 +253,6 @@ exports.create = async (req) => {
 
     const userRole = req.user?.role || "user";
 
-    // Insert payment
     const [paymentResult] = await db.query(
       `INSERT INTO payments (timestamp, reference_no, amount, paymentable_id, paymentable_type, note, status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
@@ -277,7 +269,6 @@ exports.create = async (req) => {
 
     const paymentId = paymentResult.insertId;
 
-    // Upload attachments if any
     if (req.files && req.files.attachment) {
       const attachments = Array.isArray(req.files.attachment)
         ? req.files.attachment
@@ -305,5 +296,69 @@ exports.create = async (req) => {
     };
   } catch (error) {
     console.error(error);
+  }
+};
+
+exports.search = async (req) => {
+  try {
+    const { type, paymentable_id } = req.query;
+
+    if (!type || !paymentable_id) {
+      throw new Error(
+        "Missing required query parameters: type or paymentable_id"
+      );
+    }
+
+    const paymentableType =
+      type === "purchase"
+        ? "App\\Models\\Purchase"
+        : type === "sale"
+        ? "App\\Models\\Sale"
+        : null;
+
+    if (!paymentableType) {
+      throw new Error("Invalid type: must be either 'purchase' or 'sale'");
+    }
+
+    // 1. Fetch all payments
+    const [payments] = await db.query(
+      `SELECT * FROM payments WHERE paymentable_id = ? AND paymentable_type = ?`,
+      [paymentable_id, paymentableType]
+    );
+
+    if (payments.length === 0) {
+      return { status: "success", data: [] };
+    }
+
+    const paymentIds = payments.map((p) => p.id);
+    const placeholders = paymentIds.map(() => "?").join(", ");
+
+    // 2. Get images for each payment
+    const [images] = await db.query(
+      `SELECT * FROM images WHERE imageable_type = 'App\\\\Models\\\\Payment' AND imageable_id IN (${placeholders})`,
+      paymentIds
+    );
+
+    // 3. Merge images into payments
+    const paymentsWithImages = payments.map((payment) => {
+      const relatedImages = images.filter(
+        (img) => img.imageable_id === payment.id
+      );
+      return {
+        ...payment,
+        images: relatedImages,
+      };
+    });
+
+    return {
+      status: "success",
+      data: paymentsWithImages,
+    };
+  } catch (error) {
+    console.error("[payment.search] error:", error);
+    return {
+      status: "error",
+      message: error.message || "Failed to retrieve payments",
+    };
   }
 };
