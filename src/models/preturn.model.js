@@ -84,3 +84,29 @@ exports.create = async (req) => {
     };
   }
 };
+
+exports.search = async (req) => {
+  try {
+    const { purchase_id } = req.query;
+
+    if (!purchase_id) {
+      throw new Error("Missing required query parameter: purchase_id");
+    }
+
+    const [preturns] = await db.query(
+      `SELECT * FROM preturns WHERE purchase_id = ?`,
+      [purchase_id]
+    );
+
+    return {
+      status: "success",
+      data: preturns,
+    };
+  } catch (error) {
+    console.error("searchPreturns error:", error);
+    return {
+      status: "error",
+      message: error.message || "Failed to retrieve preturns",
+    };
+  }
+};

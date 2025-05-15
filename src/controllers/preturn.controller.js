@@ -9,3 +9,13 @@ exports.createPreturn = async (req, res) => {
     console.error(error);
   }
 };
+
+exports.searchPreturn = async (req, res) => {
+  try {
+    const returns = await Preturn.search(req);
+
+    res.json(returns);
+  } catch (error) {
+    console.error(error);
+  }
+};
