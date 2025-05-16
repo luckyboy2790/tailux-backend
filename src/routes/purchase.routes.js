@@ -5,5 +5,6 @@ const purchaseController = require("../controllers/purchase.controller");
 router.get("/search", purchaseController.getPurchaseSearch);
 router.get("/search_pending", purchaseController.getPendingPurchaseSearch);
 router.get("/get_detail", purchaseController.getPurchaseDetail);
+router.post("/create", purchaseController.createPurchase);
 
 module.exports = router;

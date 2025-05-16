@@ -146,3 +146,52 @@ exports.searchStores = async (req) => {
     };
   }
 };
+
+exports.getStores = async (req) => {
+  try {
+    const query = `
+      SELECT
+        s.id AS store_id,
+        s.name AS store_name,
+        s.created_at AS store_created_at,
+        s.updated_at AS store_updated_at,
+        c.id AS company_id,
+        c.name AS company_name,
+        c.created_at AS company_created_at,
+        c.updated_at AS company_updated_at
+      FROM stores s
+      LEFT JOIN companies c ON c.id = s.company_id
+    `;
+
+    // run query
+    const [rows] = await db.query(query);
+
+    // map to JS objects
+    const stores = rows.map((r) => ({
+      id: r.store_id,
+      name: r.store_name,
+      created_at: r.store_created_at,
+      updated_at: r.store_updated_at,
+      company: {
+        id: r.company_id,
+        name: r.company_name,
+        created_at: r.company_created_at,
+        updated_at: r.company_updated_at,
+      },
+    }));
+
+    // mirror your sendResponse shape
+    return {
+      status: "Success",
+      data: stores,
+      message: null,
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "Error",
+      message: "Failed to fetch stores",
+      data: null,
+    };
+  }
+};

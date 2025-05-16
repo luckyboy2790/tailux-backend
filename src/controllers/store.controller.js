@@ -8,3 +8,13 @@ exports.getStoreSearch = async (req, res) => {
     res.status(500).json({ error: "Server Error" });
   }
 };
+
+exports.getTotalStores = async (req, res) => {
+  try {
+    const store = await Store.getStores(req);
+
+    res.json(store);
+  } catch (error) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};

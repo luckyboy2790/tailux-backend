@@ -1,4 +1,9 @@
+const moment = require("moment");
+const { v4 } = require("uuid");
+const slugify = require("slugify");
+const path = require("path");
 const db = require("../config/db");
+const { putObject } = require("../utils/putObject");
 
 exports.searchPurchases = async (filters) => {
   try {
@@ -564,5 +569,167 @@ exports.getPurchaseDetail = async (req) => {
     };
   } catch (error) {
     console.error(error);
+  }
+};
+
+exports.create = async (req) => {
+  try {
+    const {
+      date,
+      reference_no,
+      store,
+      supplier,
+      credit_days,
+      discount,
+      discount_string,
+      shipping,
+      shipping_string,
+      returns,
+      grand_total,
+      note = "",
+      orders_json,
+    } = req.body;
+
+    if (!date || !reference_no || !store || !supplier || !credit_days) {
+      throw new Error(
+        "Missing required fields: date, reference_no, store, supplier, credit_days"
+      );
+    }
+
+    const orders = JSON.parse(orders_json || "[]");
+
+    if (orders.length === 0) {
+      throw new Error("Please select at least one product");
+    }
+
+    const [exists] = await db.query(
+      `SELECT id FROM purchases WHERE reference_no = ? AND supplier_id = ?`,
+      [reference_no, supplier]
+    );
+
+    if (exists.length > 0) {
+      throw new Error("Reference number already taken");
+    }
+
+    const timestamp = moment(date).format("YYYY-MM-DD HH:mm:ss");
+    const user_id = req.user?.id || 1;
+    const user_role = req.user?.role || "user";
+
+    const [storeData] = await db.query(
+      `SELECT company_id FROM stores WHERE id = ?`,
+      [store]
+    );
+    if (storeData.length === 0) {
+      throw new Error("Store not found");
+    }
+    const company_id = storeData[0].company_id;
+
+    const expiry_date = moment(timestamp)
+      .add(credit_days, "days")
+      .format("YYYY-MM-DD");
+
+    const [purchaseInsert] = await db.query(
+      `INSERT INTO purchases (user_id, timestamp, reference_no, store_id, company_id, supplier_id, credit_days, expiry_date, note, status, discount, discount_string, shipping, shipping_string, returns, grand_total, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        user_id,
+        timestamp,
+        reference_no,
+        store,
+        company_id,
+        supplier,
+        credit_days,
+        expiry_date,
+        note,
+        user_role !== "secretary" ? 1 : 0,
+        discount,
+        discount_string,
+        -1 * shipping,
+        shipping_string,
+        returns,
+        grand_total,
+      ]
+    );
+
+    const purchase_id = purchaseInsert.insertId;
+
+    if (req.files && req.files.attachment) {
+      const attachments = Array.isArray(req.files.attachment)
+        ? req.files.attachment
+        : [req.files.attachment];
+
+      const [companyData] = await db.query(
+        `SELECT name FROM companies WHERE id = ?`,
+        [company_id]
+      );
+      const [supplierData] = await db.query(
+        `SELECT company FROM suppliers WHERE id = ?`,
+        [supplier]
+      );
+      const company_name = companyData[0]?.name || "";
+      const supplier_slug = slugify(supplierData[0]?.company || "", {
+        lower: true,
+      });
+
+      for (let i = 0; i < attachments.length; i++) {
+        const file = attachments[i];
+        const ext = path.extname(file.name);
+        const filename = `${company_name}_${reference_no}_${supplier_slug}_${v4()}${ext}`;
+
+        const { key } = await putObject(
+          file.data,
+          `images/purchases/${filename}`
+        );
+
+        await db.query(
+          `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at)
+           VALUES (?, ?, ?, NOW(), NOW())`,
+          [`${key}`, purchase_id, "App\\Models\\Purchase"]
+        );
+      }
+    }
+
+    for (const item of orders) {
+      const subtotal = parseInt(item.cost) * parseInt(item.quantity);
+      await db.query(
+        `INSERT INTO orders (product_id, cost, quantity, expiry_date, subtotal, orderable_id, orderable_type, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [
+          item.product_id,
+          item.cost,
+          item.quantity,
+          item.expiry_date || null,
+          subtotal,
+          purchase_id,
+          "App\\Models\\Purchase",
+        ]
+      );
+
+      const [storeProductRows] = await db.query(
+        `SELECT id, quantity FROM store_products WHERE store_id = ? AND product_id = ?`,
+        [store, item.product_id]
+      );
+
+      if (storeProductRows.length > 0) {
+        await db.query(
+          `UPDATE store_products SET quantity = quantity + ? WHERE id = ?`,
+          [item.quantity, storeProductRows[0].id]
+        );
+      } else {
+        await db.query(
+          `INSERT INTO store_products (store_id, product_id, quantity, created_at, updated_at)
+           VALUES (?, ?, ?, NOW(), NOW())`,
+          [store, item.product_id, item.quantity]
+        );
+      }
+    }
+
+    return {
+      status: "success",
+      purchase_id,
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(error.message);
   }
 };

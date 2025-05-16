@@ -154,3 +154,89 @@ exports.search = async (req) => {
     throw error;
   }
 };
+
+exports.getProducts = async (req) => {
+  try {
+    const query = `
+      SELECT
+        p.id, p.name, p.code, p.barcode_symbology_id, p.category_id,
+        p.unit, p.cost, p.price, p.tax_id, p.tax_method,
+        p.alert_quantity, p.supplier_id, p.image, p.detail,
+        p.created_at, p.updated_at,
+        (
+          SELECT COALESCE(SUM(quantity), 0)
+          FROM orders o
+          WHERE o.product_id = p.id AND o.orderable_type = 'App\\Models\\Purchase'
+        ) - (
+          SELECT COALESCE(SUM(quantity), 0)
+          FROM orders o
+          WHERE o.product_id = p.id AND o.orderable_type = 'App\\Models\\Sale'
+        ) AS quantity,
+        i.id as image_id,
+        i.path as image_path,
+        i.copied as image_copied,
+        i.created_at as image_created_at,
+        i.updated_at as image_updated_at
+      FROM products p
+      LEFT JOIN images i ON i.imageable_id = p.id AND i.imageable_type = 'App\\Models\\Product'
+      ORDER BY p.created_at DESC
+    `;
+
+    const [products] = await db.query(query);
+
+    const resultsMap = new Map();
+
+    products.forEach((product) => {
+      if (!resultsMap.has(product.id)) {
+        const productData = {
+          id: product.id,
+          name: product.name,
+          code: product.code,
+          barcode_symbology_id: product.barcode_symbology_id,
+          category_id: product.category_id,
+          unit: product.unit,
+          cost: product.cost,
+          price: product.price,
+          tax_id: product.tax_id,
+          tax_method: product.tax_method,
+          alert_quantity: product.alert_quantity,
+          supplier_id: product.supplier_id,
+          image: product.image,
+          detail: product.detail,
+          created_at: product.created_at,
+          updated_at: product.updated_at,
+          quantity: product.quantity,
+          images: [],
+        };
+        resultsMap.set(product.id, productData);
+      }
+
+      if (product.image_id) {
+        resultsMap.get(product.id).images.push({
+          id: product.image_id,
+          path: product.image_path,
+          imageable_id: product.id,
+          imageable_type: "App\\Models\\Product",
+          copied: product.image_copied,
+          created_at: product.image_created_at,
+          updated_at: product.image_updated_at,
+          type: "image",
+          src: product.image_path || null,
+        });
+      }
+    });
+
+    return {
+      status: "Success",
+      data: Array.from(resultsMap.values()),
+      message: null,
+    };
+  } catch (error) {
+    console.error("Error in getProducts:", error);
+    return {
+      status: "Error",
+      message: "Failed to fetch products",
+      data: null,
+    };
+  }
+};
