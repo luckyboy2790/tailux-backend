@@ -957,3 +957,66 @@ exports.update = async (req) => {
     throw new Error(error.message);
   }
 };
+
+exports.delete = async (req) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    const userRole = "admin";
+
+    if (!id) {
+      throw new Error("Missing purchase ID");
+    }
+
+    const [[purchase]] = await db.query(
+      `SELECT * FROM purchases WHERE id = ?`,
+      [id]
+    );
+
+    if (!purchase) {
+      throw new Error("Purchase not found");
+    }
+
+    const allowedRoles = ["user", "admin"];
+    if (purchase.status === 0) allowedRoles.push("secretary");
+
+    if (!allowedRoles.includes(userRole)) {
+      throw new Error("You are not allowed to perform this action");
+    }
+
+    await db.query(
+      `DELETE FROM orders WHERE orderable_id = ? AND orderable_type = 'App\\\\Models\\\\Purchase'`,
+      [id]
+    );
+    await db.query(
+      `DELETE FROM payments WHERE paymentable_id = ? AND paymentable_type = 'App\\\\Models\\\\Purchase'`,
+      [id]
+    );
+    await db.query(`DELETE FROM purchases WHERE id = ?`, [id]);
+
+    if (purchase.status === 0 && userRole === "admin") {
+      await db.query(
+        `INSERT INTO notifications (user_id, company_id, reference_no, supplier, amount, message, notifiable_id, notifiable_type, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [
+          userId,
+          purchase.company_id,
+          purchase.reference_no,
+          purchase.supplier || "",
+          purchase.grand_total,
+          "purchase_rejected",
+          purchase.id,
+          "App\\\\Models\\\\Purchase",
+        ]
+      );
+    }
+
+    return { status: "success" };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "error",
+      message: error.message,
+    };
+  }
+};

@@ -46,3 +46,13 @@ exports.updatePurchase = async (req, res) => {
     res.status(500).json({ error: "Server Error" });
   }
 };
+
+exports.deletePurchase = async (req, res) => {
+  try {
+    const purchase = await Purchase.delete(req);
+
+    res.json(purchase);
+  } catch (error) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
