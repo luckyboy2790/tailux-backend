@@ -499,9 +499,7 @@ exports.getPurchaseDetail = async (req) => {
     const { purchaseId } = req.query;
 
     const [purchaseRows] = await db.query(
-      `
-      SELECT * FROM purchases WHERE id = ?
-    `,
+      `SELECT * FROM purchases WHERE id = ?`,
       [purchaseId]
     );
 
@@ -520,24 +518,30 @@ exports.getPurchaseDetail = async (req) => {
       [companyRows],
       [supplierRows],
       [storeRows],
+      [productRows],
+      [paymentImagesRows],
     ] = await Promise.all([
       db.query(`SELECT * FROM users WHERE id = ?`, [purchase.user_id]),
       db.query(
-        `SELECT * FROM orders WHERE orderable_id = ? AND orderable_type = 'App\\Models\\Purchase'`,
+        `SELECT o.* FROM orders o WHERE o.orderable_id = ? AND o.orderable_type = 'App\\\\Models\\\\Purchase'`,
         [purchaseId]
       ),
       db.query(
-        `SELECT * FROM payments WHERE paymentable_id = ? AND paymentable_type = 'App\\Models\\Purchase'`,
+        `SELECT * FROM payments WHERE paymentable_id = ? AND paymentable_type = 'App\\\\Models\\\\Purchase'`,
         [purchaseId]
       ),
       db.query(`SELECT * FROM preturns WHERE purchase_id = ?`, [purchaseId]),
       db.query(
-        `SELECT * FROM images WHERE imageable_id = ? AND imageable_type = 'App\\Models\\Purchase'`,
+        `SELECT * FROM images WHERE imageable_id = ? AND imageable_type = 'App\\\\Models\\\\Purchase'`,
         [purchaseId]
       ),
       db.query(`SELECT * FROM companies WHERE id = ?`, [purchase.company_id]),
       db.query(`SELECT * FROM suppliers WHERE id = ?`, [purchase.supplier_id]),
       db.query(`SELECT * FROM stores WHERE id = ?`, [purchase.store_id]),
+      db.query(`SELECT * FROM products`),
+      db.query(
+        `SELECT * FROM images WHERE imageable_type = 'App\\Models\\Payment'`
+      ),
     ]);
 
     const returnedAmount = preturnsRows
@@ -549,6 +553,19 @@ exports.getPurchaseDetail = async (req) => {
       .reduce((sum, item) => sum + (item.amount || 0), 0);
 
     const totalAmount = (purchase.grand_total || 0) - returnedAmount;
+
+    // Attach product to each order
+    const productMap = Object.fromEntries(productRows.map((p) => [p.id, p]));
+    ordersRows.forEach((order) => {
+      order.product = productMap[order.product_id] || null;
+    });
+
+    // Attach images to each payment
+    paymentsRows.forEach((payment) => {
+      payment.images = paymentImagesRows.filter(
+        (img) => img.imageable_id === payment.id
+      );
+    });
 
     purchase.user = userRows[0] || null;
     purchase.orders = ordersRows;
@@ -569,6 +586,10 @@ exports.getPurchaseDetail = async (req) => {
     };
   } catch (error) {
     console.error(error);
+    return {
+      status: "error",
+      message: error.message,
+    };
   }
 };
 
@@ -760,12 +781,13 @@ exports.update = async (req) => {
     }
 
     const orders = JSON.parse(orders_json);
+
     if (orders.length === 0) {
       throw new Error("Please select at least one product");
     }
 
     const [duplicate] = await db.query(
-      `SELECT id FROM purchases WHERE reference_no = ? AND id != ? AND supplier_id = ?`,
+      "SELECT id FROM purchases WHERE reference_no = ? AND id != ? AND supplier_id = ?",
       [reference_no, id, supplier]
     );
     if (duplicate.length > 0) {
@@ -773,7 +795,7 @@ exports.update = async (req) => {
     }
 
     const [storeRow] = await db.query(
-      `SELECT company_id FROM stores WHERE id = ?`,
+      "SELECT company_id FROM stores WHERE id = ?",
       [store]
     );
     if (storeRow.length === 0) throw new Error("Store not found");
@@ -811,11 +833,11 @@ exports.update = async (req) => {
         : [req.files.attachment];
 
       const [[companyRow]] = await db.query(
-        `SELECT name FROM companies WHERE id = ?`,
+        "SELECT name FROM companies WHERE id = ?",
         [company_id]
       );
       const [[supplierRow]] = await db.query(
-        `SELECT company FROM suppliers WHERE id = ?`,
+        "SELECT company FROM suppliers WHERE id = ?",
         [supplier]
       );
 
@@ -841,12 +863,15 @@ exports.update = async (req) => {
       }
     }
 
+    console.log(id);
+
     const [existingOrders] = await db.query(
-      `SELECT id FROM orders WHERE orderable_id = ? AND orderable_type = 'App\\Models\\Purchase'`,
+      `SELECT id FROM orders WHERE orderable_id = ? AND orderable_type = 'App\\\\Models\\\\Purchase'`,
       [id]
     );
+
     const existingIds = existingOrders.map((o) => o.id);
-    const incomingIds = orders.filter((o) => o.id).map((o) => o.id);
+    const incomingIds = orders.map((o) => o.id).filter(Boolean);
 
     const deleteIds = existingIds.filter((eid) => !incomingIds.includes(eid));
     if (deleteIds.length > 0) {
