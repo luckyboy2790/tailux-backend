@@ -733,3 +733,202 @@ exports.create = async (req) => {
     throw new Error(error.message);
   }
 };
+
+exports.update = async (req) => {
+  try {
+    const {
+      id,
+      date,
+      reference_no,
+      store,
+      supplier,
+      credit_days = 0,
+      discount,
+      discount_string,
+      shipping,
+      shipping_string,
+      returns,
+      grand_total,
+      note = "",
+      orders_json = "[]",
+    } = req.body;
+
+    if (!id || !date || !reference_no || !store || !supplier) {
+      throw new Error(
+        "Missing required fields: id, date, reference_no, store, supplier"
+      );
+    }
+
+    const orders = JSON.parse(orders_json);
+    if (orders.length === 0) {
+      throw new Error("Please select at least one product");
+    }
+
+    const [duplicate] = await db.query(
+      `SELECT id FROM purchases WHERE reference_no = ? AND id != ? AND supplier_id = ?`,
+      [reference_no, id, supplier]
+    );
+    if (duplicate.length > 0) {
+      throw new Error("Reference number already taken");
+    }
+
+    const [storeRow] = await db.query(
+      `SELECT company_id FROM stores WHERE id = ?`,
+      [store]
+    );
+    if (storeRow.length === 0) throw new Error("Store not found");
+
+    const company_id = storeRow[0].company_id;
+    const timestamp = moment(date).format("YYYY-MM-DD HH:mm:ss");
+    const expiry_date = credit_days
+      ? moment(timestamp).add(credit_days, "days").format("YYYY-MM-DD HH:mm:ss")
+      : null;
+
+    await db.query(
+      `UPDATE purchases SET timestamp = ?, reference_no = ?, store_id = ?, company_id = ?, supplier_id = ?, credit_days = ?, expiry_date = ?, note = ?, discount = ?, discount_string = ?, shipping = ?, shipping_string = ?, returns = ?, grand_total = ?, updated_at = NOW() WHERE id = ?`,
+      [
+        timestamp,
+        reference_no,
+        store,
+        company_id,
+        supplier,
+        credit_days,
+        expiry_date,
+        note,
+        discount,
+        discount_string,
+        -1 * shipping,
+        shipping_string,
+        returns,
+        grand_total,
+        id,
+      ]
+    );
+
+    if (req.files && req.files.attachment) {
+      const attachments = Array.isArray(req.files.attachment)
+        ? req.files.attachment
+        : [req.files.attachment];
+
+      const [[companyRow]] = await db.query(
+        `SELECT name FROM companies WHERE id = ?`,
+        [company_id]
+      );
+      const [[supplierRow]] = await db.query(
+        `SELECT company FROM suppliers WHERE id = ?`,
+        [supplier]
+      );
+
+      const company_name = companyRow?.name || "";
+      const supplier_slug = slugify(supplierRow?.company || "", {
+        lower: true,
+      });
+      const date_time = moment().format("YYYYMMDDHHmmss");
+
+      for (let i = 0; i < attachments.length; i++) {
+        const file = attachments[i];
+        const ext = path.extname(file.name);
+        const filename = `${company_name}_${reference_no}_${supplier_slug}_${date_time}_${i}${ext}`;
+        const { key } = await putObject(
+          file.data,
+          `images/purchases/${filename}`
+        );
+
+        await db.query(
+          `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())`,
+          [key, id, "App\\Models\\Purchase"]
+        );
+      }
+    }
+
+    const [existingOrders] = await db.query(
+      `SELECT id FROM orders WHERE orderable_id = ? AND orderable_type = 'App\\Models\\Purchase'`,
+      [id]
+    );
+    const existingIds = existingOrders.map((o) => o.id);
+    const incomingIds = orders.filter((o) => o.id).map((o) => o.id);
+
+    const deleteIds = existingIds.filter((eid) => !incomingIds.includes(eid));
+    if (deleteIds.length > 0) {
+      await db.query(
+        `DELETE FROM orders WHERE id IN (${deleteIds
+          .map(() => "?")
+          .join(",")})`,
+        deleteIds
+      );
+    }
+
+    for (const item of orders) {
+      const subtotal = item.cost * item.quantity;
+      if (!item.id) {
+        await db.query(
+          `INSERT INTO orders (product_id, cost, quantity, expiry_date, subtotal, orderable_id, orderable_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+          [
+            item.product_id,
+            item.cost,
+            item.quantity,
+            item.expiry_date || null,
+            subtotal,
+            id,
+            "App\\Models\\Purchase",
+          ]
+        );
+
+        const [[stock]] = await db.query(
+          `SELECT id FROM store_products WHERE store_id = ? AND product_id = ?`,
+          [store, item.product_id]
+        );
+
+        if (stock) {
+          await db.query(
+            `UPDATE store_products SET quantity = quantity + ? WHERE id = ?`,
+            [item.quantity, stock.id]
+          );
+        } else {
+          await db.query(
+            `INSERT INTO store_products (store_id, product_id, quantity, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())`,
+            [store, item.product_id, item.quantity]
+          );
+        }
+      } else {
+        const [[oldOrder]] = await db.query(
+          `SELECT quantity FROM orders WHERE id = ?`,
+          [item.id]
+        );
+        await db.query(
+          `UPDATE orders SET product_id = ?, cost = ?, quantity = ?, expiry_date = ?, subtotal = ?, updated_at = NOW() WHERE id = ?`,
+          [
+            item.product_id,
+            item.cost,
+            item.quantity,
+            item.expiry_date,
+            subtotal,
+            item.id,
+          ]
+        );
+
+        if (oldOrder.quantity !== item.quantity) {
+          const [[storeProduct]] = await db.query(
+            `SELECT id FROM store_products WHERE store_id = ? AND product_id = ?`,
+            [store, item.product_id]
+          );
+
+          if (storeProduct) {
+            await db.query(
+              `UPDATE store_products SET quantity = quantity + ? - ? WHERE id = ?`,
+              [item.quantity, oldOrder.quantity, storeProduct.id]
+            );
+          }
+        }
+      }
+    }
+
+    return {
+      status: "success",
+      purchase_id: id,
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(error.message);
+  }
+};
