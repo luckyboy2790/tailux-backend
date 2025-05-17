@@ -8,5 +8,6 @@ router.get("/get_detail", purchaseController.getPurchaseDetail);
 router.post("/create", purchaseController.createPurchase);
 router.post("/update", purchaseController.updatePurchase);
 router.post("/delete/:id", purchaseController.deletePurchase);
+router.get("/get_all", purchaseController.totalPurchase);
 
 module.exports = router;

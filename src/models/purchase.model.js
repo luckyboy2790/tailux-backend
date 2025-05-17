@@ -1020,3 +1020,176 @@ exports.delete = async (req) => {
     };
   }
 };
+
+exports.allPurchase = async () => {
+  try {
+    const [purchaseRows] = await db.query(`
+      SELECT
+        p.*,
+        s.id AS supplier_id,
+        s.name AS supplier_name,
+        s.company AS supplier_company,
+        s.email AS supplier_email,
+        s.phone_number AS supplier_phone,
+        s.address AS supplier_address,
+        s.city AS supplier_city,
+        s.note AS supplier_note,
+        st.id AS store_id,
+        st.name AS store_name,
+        c.id AS company_id,
+        c.name AS company_name,
+        u.id AS user_id,
+        u.username AS user_username,
+        u.first_name AS user_first_name,
+        u.last_name AS user_last_name,
+        u.email AS user_email,
+        u.phone_number AS user_phone,
+        u.role AS user_role,
+        u.status AS user_status,
+        u.picture AS user_picture
+      FROM purchases p
+      LEFT JOIN suppliers s ON s.id = p.supplier_id
+      LEFT JOIN stores st ON st.id = p.store_id
+      LEFT JOIN companies c ON c.id = p.company_id
+      LEFT JOIN users u ON u.id = p.user_id
+      WHERE p.status = 1
+      ORDER BY p.timestamp DESC
+    `);
+
+    const purchaseIds = purchaseRows.map((r) => r.id);
+    if (!purchaseIds.length) return [];
+
+    const [orders] = await db.query(
+      `SELECT o.*, o.orderable_id AS purchase_id,
+              pr.name AS product_name,
+              pr.code AS product_code,
+              pr.unit AS product_unit,
+              pr.cost AS product_cost,
+              pr.price AS product_price,
+              pr.alert_quantity AS product_alert_quantity
+       FROM orders o
+       LEFT JOIN products pr ON pr.id = o.product_id
+       WHERE o.orderable_type = 'App\\\\Models\\\\Purchase'
+         AND o.orderable_id IN (${purchaseIds.map(() => "?").join(",")})
+      `,
+      purchaseIds
+    );
+
+    const [payments] = await db.query(
+      `SELECT *, paymentable_id AS purchase_id
+       FROM payments
+       WHERE paymentable_type = 'App\\\\Models\\\\Purchase'
+         AND paymentable_id IN (${purchaseIds.map(() => "?").join(",")})
+      `,
+      purchaseIds
+    );
+
+    const [preturns] = await db.query(
+      `SELECT *, purchase_id
+       FROM preturns
+       WHERE purchase_id IN (${purchaseIds.map(() => "?").join(",")})
+      `,
+      purchaseIds
+    );
+
+    const [images] = await db.query(
+      `SELECT *, imageable_id AS purchase_id,
+              CONCAT('http://your-domain.com/storage', path) AS src,
+              'image' AS type
+       FROM images
+       WHERE imageable_type = 'App\\\\Models\\\\Purchase'
+         AND imageable_id IN (${purchaseIds.map(() => "?").join(",")})
+      `,
+      purchaseIds
+    );
+
+    const mapById = (items, key = "purchase_id") => {
+      const map = {};
+      for (const item of items) {
+        const id = item[key];
+        if (!map[id]) map[id] = [];
+        map[id].push(item);
+      }
+      return map;
+    };
+
+    const orderMap = mapById(orders);
+    const paymentMap = mapById(payments);
+    const returnMap = mapById(preturns);
+    const imageMap = mapById(images);
+
+    return purchaseRows.map((row) => {
+      const totalPaid = (paymentMap[row.id] || []).reduce(
+        (sum, p) => sum + parseFloat(p.amount),
+        0
+      );
+      const totalReturned = (returnMap[row.id] || []).reduce(
+        (sum, r) => sum + parseFloat(r.amount),
+        0
+      );
+
+      return {
+        ...row,
+        total_amount: row.grand_total - totalReturned,
+        user: {
+          id: row.user_id,
+          username: row.user_username,
+          first_name: row.user_first_name,
+          last_name: row.user_last_name,
+          email: row.user_email,
+          phone_number: row.user_phone,
+          role: row.user_role,
+          status: row.user_status,
+          picture: row.user_picture,
+          name: `${row.user_first_name} ${row.user_last_name}`,
+          company: {
+            id: row.company_id,
+            name: row.company_name,
+          },
+        },
+        orders: (orderMap[row.id] || []).map((order) => ({
+          ...order,
+          product: {
+            id: order.product_id,
+            name: order.product_name,
+            code: order.product_code,
+            unit: order.product_unit,
+            cost: order.product_cost,
+            price: order.product_price,
+            alert_quantity: order.product_alert_quantity,
+          },
+        })),
+        payments: paymentMap[row.id] || [],
+        preturns: returnMap[row.id] || [],
+        images: imageMap[row.id] || [],
+        company: {
+          id: row.company_id,
+          name: row.company_name,
+        },
+        supplier: {
+          id: row.supplier_id,
+          name: row.supplier_name,
+          company: row.supplier_company,
+          email: row.supplier_email,
+          phone_number: row.supplier_phone,
+          address: row.supplier_address,
+          city: row.supplier_city,
+          note: row.supplier_note,
+        },
+        store: {
+          id: row.store_id,
+          name: row.store_name,
+          company: {
+            id: row.company_id,
+            name: row.company_name,
+          },
+        },
+        paid_amount: totalPaid,
+        returned_amount: totalReturned,
+      };
+    });
+  } catch (error) {
+    console.error(error);
+    return [];
+  }
+};
