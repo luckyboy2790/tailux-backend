@@ -8,3 +8,23 @@ exports.getSalesSearch = async (req, res) => {
     res.status(500).json({ error: "Server Error" });
   }
 };
+
+exports.getSaleDetail = async (req, res) => {
+  try {
+    const sales = await Sales.getSaleDetail(req);
+
+    res.json(sales);
+  } catch (error) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
+
+exports.deleteSale = async (req, res) => {
+  try {
+    const sale = await Sales.delete(req);
+
+    res.json(sale);
+  } catch (error) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};

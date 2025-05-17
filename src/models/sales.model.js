@@ -274,3 +274,163 @@ function buildQueryString(params) {
     )
     .join("&");
 }
+
+exports.getSaleDetail = async (req) => {
+  try {
+    const { saleId } = req.query;
+
+    const [saleRows] = await db.query(`SELECT * FROM sales WHERE id = ?`, [
+      saleId,
+    ]);
+
+    if (saleRows.length === 0) {
+      throw new Error("Sale not found");
+    }
+
+    const sale = saleRows[0];
+
+    const [
+      [userRows],
+      [ordersRows],
+      [paymentsRows],
+      [imagesRows],
+      [companyRows],
+      [customerRows],
+      [storeRows],
+      [billerRows],
+      [productRows],
+      [paymentImagesRows],
+    ] = await Promise.all([
+      db.query(`SELECT * FROM users WHERE id = ?`, [sale.user_id]),
+      db.query(
+        `SELECT o.* FROM orders o WHERE o.orderable_id = ? AND o.orderable_type = 'App\\\\Models\\\\Sale'`,
+        [saleId]
+      ),
+      db.query(
+        `SELECT * FROM payments WHERE paymentable_id = ? AND paymentable_type = 'App\\\\Models\\\\Sale'`,
+        [saleId]
+      ),
+      db.query(
+        `SELECT * FROM images WHERE imageable_id = ? AND imageable_type = 'App\\\\Models\\\\Sale'`,
+        [saleId]
+      ),
+      db.query(`SELECT * FROM companies WHERE id = ?`, [sale.company_id]),
+      db.query(`SELECT * FROM customers WHERE id = ?`, [sale.customer_id]),
+      db.query(`SELECT * FROM stores WHERE id = ?`, [sale.store_id]),
+      db.query(`SELECT * FROM users WHERE id = ?`, [sale.biller_id]),
+      db.query(`SELECT * FROM products`),
+      db.query(
+        `SELECT * FROM images WHERE imageable_type = 'App\\Models\\Payment'`
+      ),
+    ]);
+
+    const paidAmount = paymentsRows
+      .filter((item) => item.status === 1)
+      .reduce((sum, item) => sum + (item.amount || 0), 0);
+
+    const productMap = Object.fromEntries(productRows.map((p) => [p.id, p]));
+    ordersRows.forEach((order) => {
+      order.product = productMap[order.product_id] || null;
+    });
+
+    paymentsRows.forEach((payment) => {
+      payment.images = paymentImagesRows.filter(
+        (img) => img.imageable_id === payment.id
+      );
+    });
+
+    sale.user = userRows[0] || null;
+    sale.orders = ordersRows;
+    sale.payments = paymentsRows;
+    sale.images = imagesRows;
+    sale.company = companyRows[0] || null;
+    sale.customer = customerRows[0] || null;
+    sale.store = storeRows[0] || null;
+    sale.biller = billerRows[0] || null;
+
+    sale.paid_amount = paidAmount;
+
+    return {
+      status: "success",
+      data: sale,
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "error",
+      message: error.message,
+    };
+  }
+};
+
+exports.delete = async (req) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    const userRole = req.user?.role || "admin"; // fallback if role not in req
+
+    if (!id) {
+      throw new Error("Missing sale ID");
+    }
+
+    const [[sale]] = await db.query(`SELECT * FROM sales WHERE id = ?`, [id]);
+
+    if (!sale) {
+      throw new Error("Sale not found");
+    }
+
+    const allowedRoles = ["user", "admin"];
+    if (sale.status === 0) allowedRoles.push("secretary");
+
+    if (!allowedRoles.includes(userRole)) {
+      throw new Error("You are not allowed to perform this action");
+    }
+
+    await db.query(
+      `DELETE FROM orders WHERE orderable_id = ? AND orderable_type = 'App\\\\Models\\\\Sale'`,
+      [id]
+    );
+
+    await db.query(
+      `DELETE FROM payments WHERE paymentable_id = ? AND paymentable_type = 'App\\\\Models\\\\Sale'`,
+      [id]
+    );
+
+    await db.query(`DELETE FROM sales WHERE id = ?`, [id]);
+
+    if (sale.status === 0 && userRole === "admin") {
+      await db.query(
+        `INSERT INTO notifications (
+          user_id,
+          company_id,
+          reference_no,
+          supplier,
+          amount,
+          message,
+          notifiable_id,
+          notifiable_type,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [
+          userId,
+          sale.company_id,
+          sale.reference_no,
+          "", // No supplier info in sales table
+          sale.grand_total,
+          "sale_rejected",
+          sale.id,
+          "App\\\\Models\\\\Sale",
+        ]
+      );
+    }
+
+    return { status: "success" };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "error",
+      message: error.message,
+    };
+  }
+};
