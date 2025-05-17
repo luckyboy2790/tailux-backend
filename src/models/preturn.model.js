@@ -85,6 +85,76 @@ exports.create = async (req) => {
   }
 };
 
+exports.update = async (req) => {
+  try {
+    const { id, date, reference_no, amount = 0, note, purchase_id } = req.body;
+
+    if (!id || !date) throw new Error("Missing required fields: id or date");
+
+    const [[preturn]] = await db.query("SELECT * FROM preturns WHERE id = ?", [
+      id,
+    ]);
+    if (!preturn) throw new Error("Preturn not found");
+
+    const timestamp = moment(date).format("YYYY-MM-DD HH:mm:ss");
+
+    await db.query(
+      `UPDATE preturns SET timestamp = ?, reference_no = ?, amount = ?, note = ?, updated_at = NOW() WHERE id = ?`,
+      [timestamp, reference_no, amount, note, id]
+    );
+
+    if (req.files && req.files.attachment) {
+      const [[purchase]] = await db.query(
+        "SELECT * FROM purchases WHERE id = ?",
+        [purchase_id]
+      );
+      if (!purchase) throw new Error("Purchase not found");
+
+      const [[supplier]] = await db.query(
+        "SELECT company FROM suppliers WHERE id = ?",
+        [purchase.supplier_id]
+      );
+      const [[company]] = await db.query(
+        "SELECT name FROM companies WHERE id = ?",
+        [purchase.company_id]
+      );
+
+      const attachName = `${company.name}_${reference_no}_${
+        purchase.reference_no
+      }_${supplier.company}_${v4()}`;
+
+      const file = req.files.attachment;
+      const ext = path.extname(file.name);
+      const uploadPath = `images/returns/${attachName}${ext}`;
+      const { key } = await putObject(file.data, uploadPath);
+
+      await db.query(`UPDATE preturns SET attachment = ? WHERE id = ?`, [
+        key,
+        id,
+      ]);
+    }
+
+    return { status: "success", data: { id } };
+  } catch (error) {
+    console.error(error);
+    return { status: "error", message: error.message };
+  }
+};
+
+exports.delete = async (req) => {
+  try {
+    const { id } = req.params;
+    if (!id) throw new Error("Missing preturn ID");
+
+    await db.query("DELETE FROM preturns WHERE id = ?", [id]);
+
+    return { status: "success" };
+  } catch (error) {
+    console.error(error);
+    return { status: "error", message: error.message };
+  }
+};
+
 exports.search = async (req) => {
   try {
     const { purchase_id } = req.query;
@@ -108,5 +178,57 @@ exports.search = async (req) => {
       status: "error",
       message: error.message || "Failed to retrieve preturns",
     };
+  }
+};
+
+exports.approve = async (req) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+
+    const [[preturn]] = await db.query("SELECT * FROM preturns WHERE id = ?", [
+      id,
+    ]);
+    if (!preturn) throw new Error("Preturn not found");
+
+    await db.query("UPDATE preturns SET status = 1 WHERE id = ?", [id]);
+
+    const [[purchase]] = await db.query(
+      "SELECT company_id, supplier_id, reference_no, amount FROM purchases WHERE id = ?",
+      [preturn.purchase_id]
+    );
+    const [[supplier]] = await db.query(
+      "SELECT company FROM suppliers WHERE id = ?",
+      [purchase.supplier_id]
+    );
+
+    await db.query(
+      `INSERT INTO notifications (user_id, company_id, reference_no, supplier, amount, message, notifiable_id, notifiable_type, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        userId,
+        purchase.company_id,
+        preturn.reference_no,
+        supplier.company,
+        preturn.amount,
+        "preturn_approved",
+        id,
+        "App\\Models\\Preturn",
+      ]
+    );
+
+    return {
+      status: "success",
+      message: "Preturn approved",
+      data: {
+        id,
+        reference_no: preturn.reference_no,
+        amount: preturn.amount,
+        status: 1,
+      },
+    };
+  } catch (error) {
+    console.error(error);
+    return { status: "error", message: error.message };
   }
 };

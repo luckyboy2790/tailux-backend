@@ -299,6 +299,174 @@ exports.create = async (req) => {
   }
 };
 
+exports.update = async (req) => {
+  try {
+    const {
+      id,
+      date,
+      reference_no,
+      amount = 0,
+      note = "",
+      paymentable_id,
+    } = req.body;
+
+    if (!id || !date) {
+      throw new Error("Missing required fields: id or date");
+    }
+
+    const [paymentRows] = await db.query(
+      "SELECT * FROM payments WHERE id = ?",
+      [id]
+    );
+    if (paymentRows.length === 0) {
+      throw new Error("Payment not found");
+    }
+
+    const payment = paymentRows[0];
+    const paymentableType = payment.paymentable_type;
+
+    const timestamp = moment(date).format("YYYY-MM-DD HH:mm:ss");
+
+    await db.query(
+      `UPDATE payments SET timestamp = ?, reference_no = ?, amount = ?, note = ?, updated_at = NOW() WHERE id = ?`,
+      [timestamp, reference_no, amount, note, id]
+    );
+
+    const paymentableQuery =
+      paymentableType === "App\\Models\\Purchase"
+        ? `SELECT s.company, c.name as company_name, p.reference_no FROM purchases p
+            LEFT JOIN suppliers s ON p.supplier_id = s.id
+            LEFT JOIN companies c ON p.company_id = c.id
+            WHERE p.id = ?`
+        : `SELECT c.company, co.name as company_name, s.reference_no FROM sales s
+            LEFT JOIN customers c ON s.customer_id = c.id
+            LEFT JOIN companies co ON s.company_id = co.id
+            WHERE s.id = ?`;
+
+    const [rows] = await db.query(paymentableQuery, [paymentable_id]);
+    if (rows.length === 0) {
+      throw new Error("Paymentable entity not found");
+    }
+
+    const companySlug = slugify(rows[0].company || "", { lower: true });
+    const companyName = rows[0].company_name || "UnknownCompany";
+    const paymentableRef = rows[0].reference_no || "NoRef";
+
+    if (req.files && req.files.attachment) {
+      await db.query(
+        `DELETE FROM images WHERE imageable_id = ? AND imageable_type = ?`,
+        [id, "App\\Models\\Payment"]
+      );
+
+      const attachments = Array.isArray(req.files.attachment)
+        ? req.files.attachment
+        : [req.files.attachment];
+
+      for (let i = 0; i < attachments.length; i++) {
+        const file = attachments[i];
+        const ext = path.extname(file.name);
+        const uniqueName = `${companyName}_${reference_no}_${paymentableRef}_${companySlug}_${v4()}${ext}`;
+        const uploadPath = `images/payments/${uniqueName}`;
+
+        const { key } = await putObject(file.data, uploadPath);
+
+        await db.query(
+          `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())`,
+          [key, id, "App\\Models\\Payment"]
+        );
+      }
+    }
+
+    return {
+      status: "success",
+      payment_id: id,
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "error",
+      message: error.message,
+    };
+  }
+};
+
+exports.delete = async (req) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
+
+    if (!id) {
+      throw new Error("Missing payment ID");
+    }
+
+    const [[payment]] = await db.query("SELECT * FROM payments WHERE id = ?", [
+      id,
+    ]);
+
+    if (!payment) {
+      throw new Error("Payment not found");
+    }
+
+    if (payment.status === 0 && userRole === "admin") {
+      const [[paymentable]] = await db.query(
+        `SELECT * FROM ${
+          payment.paymentable_type === "App\\Models\\Purchase"
+            ? "purchases"
+            : "sales"
+        } WHERE id = ?`,
+        [payment.paymentable_id]
+      );
+
+      if (!paymentable) {
+        throw new Error("Associated record not found");
+      }
+
+      let supplier = "";
+
+      if (payment.paymentable_type === "App\\Models\\Purchase") {
+        const [[supplierRow]] = await db.query(
+          "SELECT company FROM suppliers WHERE id = ?",
+          [paymentable.supplier_id]
+        );
+        supplier = supplierRow?.company || "";
+      } else if (payment.paymentable_type === "App\\Models\\Sale") {
+        const [[customerRow]] = await db.query(
+          "SELECT company FROM customers WHERE id = ?",
+          [paymentable.customer_id]
+        );
+        supplier = customerRow?.company || "";
+      }
+
+      await db.query(
+        `INSERT INTO notifications
+        (user_id, company_id, reference_no, supplier, amount, message, notifiable_id, notifiable_type, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [
+          userId,
+          paymentable.company_id,
+          payment.reference_no,
+          supplier,
+          payment.amount,
+          "payment_rejected",
+          payment.id,
+          payment.paymentable_type,
+        ]
+      );
+    }
+
+    await db.query("DELETE FROM payments WHERE id = ?", [id]);
+
+    return { status: "success" };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "error",
+      message: error.message,
+    };
+  }
+};
+
 exports.search = async (req) => {
   try {
     const { type, paymentable_id } = req.query;
@@ -359,6 +527,91 @@ exports.search = async (req) => {
     return {
       status: "error",
       message: error.message || "Failed to retrieve payments",
+    };
+  }
+};
+
+exports.approve = async (req) => {
+  try {
+    const paymentId = req.params.id;
+    const userId = req.user?.id;
+
+    const [paymentRows] = await db.query(
+      `SELECT * FROM payments WHERE id = ?`,
+      [paymentId]
+    );
+
+    if (!paymentRows.length) throw Error("Payment not found");
+
+    const payment = paymentRows[0];
+
+    await db.query(`UPDATE payments SET status = 1 WHERE id = ?`, [paymentId]);
+
+    const isPurchase = payment.paymentable_type === "App\\Models\\Purchase";
+    const isSale = payment.paymentable_type === "App\\Models\\Sale";
+
+    let supplierCompany = "";
+    let companyId = null;
+
+    if (isPurchase) {
+      const [rows] = await db.query(
+        `SELECT s.company, p.company_id
+         FROM purchases p
+         LEFT JOIN suppliers s ON p.supplier_id = s.id
+         WHERE p.id = ?`,
+        [payment.paymentable_id]
+      );
+      if (rows.length > 0) {
+        supplierCompany = rows[0].company || "";
+        companyId = rows[0].company_id;
+      }
+    } else if (isSale) {
+      const [rows] = await db.query(
+        `SELECT c.company, s.company_id
+         FROM sales s
+         LEFT JOIN customers c ON s.customer_id = c.id
+         WHERE s.id = ?`,
+        [payment.paymentable_id]
+      );
+      if (rows.length > 0) {
+        supplierCompany = rows[0].company || "";
+        companyId = rows[0].company_id;
+      }
+    }
+
+    await db.query(
+      `INSERT INTO notifications (
+        user_id, company_id, reference_no, message,
+        supplier, amount, notifiable_id, notifiable_type,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        userId,
+        companyId,
+        payment.reference_no,
+        "payment_approved",
+        supplierCompany,
+        payment.amount,
+        paymentId,
+        "App\\Models\\Payment",
+      ]
+    );
+
+    return {
+      status: "success",
+      message: "Payment approved",
+      data: {
+        id: paymentId,
+        reference_no: payment.reference_no,
+        amount: payment.amount,
+        status: 1,
+      },
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "error",
+      message: error.message || "Failed to approve payment",
     };
   }
 };
