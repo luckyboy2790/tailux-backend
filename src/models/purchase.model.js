@@ -828,6 +828,11 @@ exports.update = async (req) => {
     );
 
     if (req.files && req.files.attachment) {
+      await db.query(
+        `DELETE FROM images WHERE imageable_id = ? AND imageable_type = ?`,
+        [id, "App\\Models\\Purchase"]
+      );
+
       const attachments = Array.isArray(req.files.attachment)
         ? req.files.attachment
         : [req.files.attachment];
