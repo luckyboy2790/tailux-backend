@@ -146,3 +146,27 @@ exports.searchUsers = async (req) => {
     };
   }
 };
+
+exports.getUserById = async (req) => {
+  try {
+    const userId = req.params.id;
+    const [rows] = await db.query("SELECT * FROM users WHERE id = ? LIMIT 1", [
+      userId,
+    ]);
+
+    if (rows.length === 0) {
+      return {
+        status: "Error",
+        message: "User not found",
+        data: null,
+      };
+    }
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "Error",
+      message: "Failed to fetch user",
+      data: null,
+    };
+  }
+};
