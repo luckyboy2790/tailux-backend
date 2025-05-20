@@ -19,6 +19,16 @@ exports.getSaleDetail = async (req, res) => {
   }
 };
 
+exports.createSale = async (req, res) => {
+  try {
+    const sale = await Sales.create(req);
+
+    res.json(sale);
+  } catch (error) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
+
 exports.deleteSale = async (req, res) => {
   try {
     const sale = await Sales.delete(req);
