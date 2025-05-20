@@ -5,10 +5,19 @@ const path = require("path");
 const db = require("../config/db");
 const { putObject } = require("../utils/putObject");
 
-exports.searchPurchases = async (filters) => {
+exports.searchPurchases = async (filters, user) => {
   try {
     const values = [];
-    const filterConditions = ["p.status = 1"];
+    const filterConditions = [];
+
+    if (user.role === "user" || user.role === "secretary") {
+      filterConditions.push("p.company_id = ?");
+      values.push(user.company_id);
+    }
+
+    if (user.role !== "secretary") {
+      filterConditions.push("p.status = 1");
+    }
 
     if (filters.company_id) {
       filterConditions.push("p.company_id = ?");
