@@ -52,7 +52,7 @@ exports.create = async (req) => {
     if (req.files && req.files.attachment) {
       const file = req.files.attachment;
       const ext = path.extname(file.name);
-      const attachName = `images/returns/${companySlug}_${reference_no}_${purchase_id}_${supplierSlug}_${v4()}${ext}`;
+      const attachName = `returns/${companySlug}_${reference_no}_${purchase_id}_${supplierSlug}_${v4()}${ext}`;
 
       const { key } = await putObject(file.data, attachName);
 
@@ -60,7 +60,7 @@ exports.create = async (req) => {
         `
         UPDATE preturns SET attachment = ? WHERE id = ?
       `,
-        [key, preturnId]
+        [`/${key}`, preturnId]
       );
     }
 
@@ -125,11 +125,11 @@ exports.update = async (req) => {
 
       const file = req.files.attachment;
       const ext = path.extname(file.name);
-      const uploadPath = `images/returns/${attachName}${ext}`;
+      const uploadPath = `returns/${attachName}${ext}`;
       const { key } = await putObject(file.data, uploadPath);
 
       await db.query(`UPDATE preturns SET attachment = ? WHERE id = ?`, [
-        key,
+        `/${key}`,
         id,
       ]);
     }

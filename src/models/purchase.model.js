@@ -697,15 +697,12 @@ exports.create = async (req) => {
         const ext = path.extname(file.name);
         const filename = `${company_name}_${reference_no}_${supplier_slug}_${v4()}${ext}`;
 
-        const { key } = await putObject(
-          file.data,
-          `images/purchases/${filename}`
-        );
+        const { key } = await putObject(file.data, `purchases/${filename}`);
 
         await db.query(
           `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at)
            VALUES (?, ?, ?, NOW(), NOW())`,
-          [`${key}`, purchase_id, "App\\Models\\Purchase"]
+          [`/${key}`, purchase_id, "App\\Models\\Purchase"]
         );
       }
     }
@@ -856,14 +853,11 @@ exports.update = async (req) => {
         const file = attachments[i];
         const ext = path.extname(file.name);
         const filename = `${company_name}_${reference_no}_${supplier_slug}_${date_time}_${i}${ext}`;
-        const { key } = await putObject(
-          file.data,
-          `images/purchases/${filename}`
-        );
+        const { key } = await putObject(file.data, `purchases/${filename}`);
 
         await db.query(
           `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())`,
-          [key, id, "App\\Models\\Purchase"]
+          [`/${key}`, id, "App\\Models\\Purchase"]
         );
       }
     }

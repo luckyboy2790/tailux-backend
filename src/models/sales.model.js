@@ -534,12 +534,12 @@ exports.create = async (req) => {
         const ext = path.extname(file.name);
         const filename = `${company_name}_${reference_no}_${customer_slug}_${v4()}${ext}`;
 
-        const { key } = await putObject(file.data, `images/sales/${filename}`);
+        const { key } = await putObject(file.data, `sales/${filename}`);
 
         await db.query(
           `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at)
            VALUES (?, ?, ?, NOW(), NOW())`,
-          [key, sale_id, "App\\Models\\Sale"]
+          [`${key}`, sale_id, "App\\Models\\Sale"]
         );
       }
     }

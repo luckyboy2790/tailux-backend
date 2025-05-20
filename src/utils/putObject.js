@@ -14,11 +14,15 @@ exports.putObject = async (file, fileName) => {
 
     const data = await s3Client.send(command);
 
+    console.log(data.$metadata.httpStatusCode);
+
     if (data.$metadata.httpStatusCode !== 200) {
       return;
     }
 
     let url = `https://${process.env.AWS_BUCKET}.s3.${process.env.AWS_DEFAULT_REGION}.amazonaws.com/${params.Key}`;
+
+    console.log(url);
 
     return { url, key: params.Key };
   } catch (err) {
