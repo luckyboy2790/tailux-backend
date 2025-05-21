@@ -182,6 +182,11 @@ exports.searchSales = async (req, res) => {
           [sale.id]
         );
 
+        const [payments] = await db.query(
+          `SELECT * FROM payments WHERE paymentable_id = ? AND paymentable_type LIKE '%Sale%'`,
+          [sale.id]
+        );
+
         return {
           ...sale,
           customer,
@@ -189,6 +194,7 @@ exports.searchSales = async (req, res) => {
           company,
           store,
           images,
+          payments,
         };
       })
     );
@@ -539,7 +545,7 @@ exports.create = async (req) => {
         await db.query(
           `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at)
            VALUES (?, ?, ?, NOW(), NOW())`,
-          [`${key}`, sale_id, "App\\Models\\Sale"]
+          [`/${key}`, sale_id, "App\\Models\\Sale"]
         );
       }
     }
