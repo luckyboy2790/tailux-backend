@@ -485,6 +485,8 @@ exports.create = async (req) => {
     const user_id = req.user?.id || 1;
     const user_role = req.user?.role || "user";
 
+    console.log(user_id);
+
     const [storeData] = await db.query(
       "SELECT id, company_id FROM stores WHERE id = ?",
       [store]
@@ -496,7 +498,6 @@ exports.create = async (req) => {
 
     const timestamp = moment(date).format("YYYY-MM-DD HH:mm:ss");
 
-    // Create the sale record
     const [saleInsert] = await db.query(
       `INSERT INTO sales (user_id, biller_id, timestamp, reference_no, store_id, company_id, customer_id, note, status, grand_total, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
@@ -516,7 +517,6 @@ exports.create = async (req) => {
 
     const sale_id = saleInsert.insertId;
 
-    // Handle file upload to S3 with smart naming
     if (req.files && req.files.attachment) {
       const attachments = Array.isArray(req.files.attachment)
         ? req.files.attachment
@@ -550,7 +550,6 @@ exports.create = async (req) => {
       }
     }
 
-    // Save each order item and update store quantity
     for (const item of orders) {
       const subtotal = parseInt(item.price) * parseInt(item.quantity);
 
@@ -590,5 +589,191 @@ exports.create = async (req) => {
   } catch (error) {
     console.error(error);
     throw new Error(error.message || "Something went wrong");
+  }
+};
+
+exports.update = async (req) => {
+  try {
+    const {
+      id,
+      date,
+      reference_no,
+      customer,
+      note = "",
+      grand_total,
+      orders_json = "[]",
+    } = req.body;
+
+    if (!id || !date || !reference_no || !customer) {
+      throw new Error(
+        "Missing required fields: id, date, reference_no, customer"
+      );
+    }
+
+    const orders = JSON.parse(orders_json);
+
+    if (orders.length === 0) {
+      throw new Error("Please select at least one product");
+    }
+
+    const [duplicate] = await db.query(
+      "SELECT id FROM sales WHERE reference_no = ? AND id != ? AND customer_id = ?",
+      [reference_no, id, customer]
+    );
+    if (duplicate.length > 0) {
+      throw new Error("Reference number already taken");
+    }
+
+    const [[saleRow]] = await db.query(
+      "SELECT store_id FROM sales WHERE id = ?",
+      [id]
+    );
+    if (!saleRow) throw new Error("Sale not found");
+
+    const store_id = saleRow.store_id;
+
+    const [[storeRow]] = await db.query(
+      "SELECT company_id FROM stores WHERE id = ?",
+      [store_id]
+    );
+    if (!storeRow) throw new Error("Store not found");
+
+    const company_id = storeRow.company_id;
+    const timestamp = moment(date).format("YYYY-MM-DD HH:mm:ss");
+
+    await db.query(
+      `UPDATE sales SET 
+       timestamp = ?, 
+       reference_no = ?, 
+       company_id = ?, 
+       customer_id = ?, 
+       note = ?, 
+       grand_total = ?, 
+       updated_at = NOW() 
+       WHERE id = ?`,
+      [timestamp, reference_no, company_id, customer, note, grand_total, id]
+    );
+
+    if (req.files && req.files.attachment) {
+      await db.query(
+        `DELETE FROM images WHERE imageable_id = ? AND imageable_type = ?`,
+        [id, "App\\Models\\Sale"]
+      );
+
+      const attachments = Array.isArray(req.files.attachment)
+        ? req.files.attachment
+        : [req.files.attachment];
+
+      const [[companyRow]] = await db.query(
+        "SELECT name FROM companies WHERE id = ?",
+        [company_id]
+      );
+      const [[customerRow]] = await db.query(
+        "SELECT name FROM customers WHERE id = ?",
+        [customer]
+      );
+
+      const company_name = companyRow?.name || "";
+      const customer_slug = slugify(customerRow?.name || "", {
+        lower: true,
+      });
+      const date_time = moment().format("YYYYMMDDHHmmss");
+
+      for (let i = 0; i < attachments.length; i++) {
+        const file = attachments[i];
+        const ext = path.extname(file.name);
+        const filename = `${company_name}_${reference_no}_${customer_slug}_${date_time}_${i}${ext}`;
+        const { key } = await putObject(file.data, `sales/${filename}`);
+
+        await db.query(
+          `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())`,
+          [`/${key}`, id, "App\\Models\\Sale"]
+        );
+      }
+    }
+
+    const [existingOrders] = await db.query(
+      `SELECT id FROM orders WHERE orderable_id = ? AND orderable_type = 'App\\\\Models\\\\Sale'`,
+      [id]
+    );
+
+    const existingIds = existingOrders.map((o) => o.id);
+    const incomingIds = orders.map((o) => o.id).filter(Boolean);
+
+    const deleteIds = existingIds.filter((eid) => !incomingIds.includes(eid));
+    if (deleteIds.length > 0) {
+      await db.query(
+        `DELETE FROM orders WHERE id IN (${deleteIds
+          .map(() => "?")
+          .join(",")})`,
+        deleteIds
+      );
+    }
+
+    for (const item of orders) {
+      const subtotal = item.price * item.quantity;
+
+      if (!item.id) {
+        await db.query(
+          `INSERT INTO orders (product_id, price, quantity, subtotal, orderable_id, orderable_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+          [
+            item.product_id,
+            item.price,
+            item.quantity,
+            subtotal,
+            id,
+            "App\\Models\\Sale",
+          ]
+        );
+
+        const [[storeProduct]] = await db.query(
+          `SELECT id FROM store_products WHERE store_id = ? AND product_id = ?`,
+          [store_id, item.product_id]
+        );
+
+        if (storeProduct) {
+          await db.query(
+            `UPDATE store_products SET quantity = quantity - ? WHERE id = ?`,
+            [item.quantity, storeProduct.id]
+          );
+        } else {
+          throw new Error(
+            `Product (ID: ${item.product_id}) not available in this store`
+          );
+        }
+      } else {
+        const [[oldOrder]] = await db.query(
+          `SELECT quantity FROM orders WHERE id = ?`,
+          [item.id]
+        );
+
+        await db.query(
+          `UPDATE orders SET product_id = ?, price = ?, quantity = ?, subtotal = ?, updated_at = NOW() WHERE id = ?`,
+          [item.product_id, item.price, item.quantity, subtotal, item.id]
+        );
+
+        if (oldOrder.quantity !== item.quantity) {
+          const [[storeProduct]] = await db.query(
+            `SELECT id FROM store_products WHERE store_id = ? AND product_id = ?`,
+            [store_id, item.product_id]
+          );
+
+          if (storeProduct) {
+            await db.query(
+              `UPDATE store_products SET quantity = quantity + ? - ? WHERE id = ?`,
+              [oldOrder.quantity, item.quantity, storeProduct.id]
+            );
+          }
+        }
+      }
+    }
+
+    return {
+      status: "success",
+      sale_id: id,
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(error.message);
   }
 };
