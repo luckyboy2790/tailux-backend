@@ -5,8 +5,13 @@ const slugify = require("slugify");
 const { v4 } = require("uuid");
 const path = require("path");
 
-exports.searchPending = async (req, res) => {
+exports.searchPending = async (req) => {
   try {
+    // Ensure authenticated user
+    if (!req.user || !req.user.id) {
+      throw new Error("Unauthorized: User not authenticated");
+    }
+    
     const {
       page = 1,
       per_page = 10,
@@ -37,12 +42,107 @@ exports.searchPending = async (req, res) => {
     const params = [];
     const countParams = [];
 
-    if (company_id) {
-      query += ` AND (pu.company_id = ? OR sa.company_id = ?)`;
-      countQuery += ` AND (pu.company_id = ? OR sa.company_id = ?)`;
-
-      params.push(company_id, company_id);
-      countParams.push(company_id, company_id);
+    // Apply company filter based on user role
+    let userCompanyId = "";
+    if (req.user.role === 'user' || req.user.role === 'secretary') {
+      userCompanyId = req.user.company_id;
+    }
+    
+    // Use company_id from query params if provided, otherwise use user's company_id
+    const effectiveCompanyId = company_id || userCompanyId;
+    
+    if (effectiveCompanyId) {
+      // Get purchases and sales for the company to filter payments
+      const [companyPurchases] = await db.query(
+        `SELECT id FROM purchases WHERE company_id = ?`,
+        [effectiveCompanyId]
+      );
+      
+      const [companySales] = await db.query(
+        `SELECT id FROM sales WHERE company_id = ?`,
+        [effectiveCompanyId]
+      );
+      
+      const purchaseIds = companyPurchases.map(p => p.id);
+      const saleIds = companySales.map(s => s.id);
+      
+      // No purchases or sales found for company
+      if (purchaseIds.length === 0 && saleIds.length === 0) {
+        return {
+          status: "Success",
+          data: {
+            current_page: parseInt(page),
+            data: [],
+            first_page_url: "",
+            from: 0,
+            last_page: 0,
+            last_page_url: "",
+            links: [],
+            next_page_url: null,
+            path: "",
+            per_page: parseInt(per_page),
+            prev_page_url: null,
+            to: 0,
+            total: 0,
+          },
+          message: null,
+        };
+      }
+      
+      // Get payment IDs for purchases and sales of this company
+      let purchasePaymentIds = [];
+      let salePaymentIds = [];
+      
+      if (purchaseIds.length > 0) {
+        const [purchasePayments] = await db.query(
+          `SELECT id FROM payments 
+           WHERE paymentable_type = 'App\\\\Models\\\\Purchase' 
+           AND paymentable_id IN (${purchaseIds.map(() => "?").join(",")})`,
+          purchaseIds
+        );
+        purchasePaymentIds = purchasePayments.map(p => p.id);
+      }
+      
+      if (saleIds.length > 0) {
+        const [salePayments] = await db.query(
+          `SELECT id FROM payments 
+           WHERE paymentable_type = 'App\\\\Models\\\\Sale' 
+           AND paymentable_id IN (${saleIds.map(() => "?").join(",")})`,
+          saleIds
+        );
+        salePaymentIds = salePayments.map(p => p.id);
+      }
+      
+      const companyPaymentIds = [...purchasePaymentIds, ...salePaymentIds];
+      
+      if (companyPaymentIds.length > 0) {
+        query += ` AND p.id IN (${companyPaymentIds.map(() => "?").join(",")})`;
+        countQuery += ` AND p.id IN (${companyPaymentIds.map(() => "?").join(",")})`;
+        
+        params.push(...companyPaymentIds);
+        countParams.push(...companyPaymentIds);
+      } else {
+        // No payments found for this company
+        return {
+          status: "Success",
+          data: {
+            current_page: parseInt(page),
+            data: [],
+            first_page_url: "",
+            from: 0,
+            last_page: 0,
+            last_page_url: "",
+            links: [],
+            next_page_url: null,
+            path: "",
+            per_page: parseInt(per_page),
+            prev_page_url: null,
+            to: 0,
+            total: 0,
+          },
+          message: null,
+        };
+      }
     }
 
     if (reference_no) {
@@ -194,9 +294,20 @@ exports.searchPending = async (req, res) => {
     return response;
   } catch (error) {
     console.error(error);
+    
+    // Return structured error response
+    if (error.message.includes("Unauthorized")) {
+      return {
+        status: "Error",
+        message: error.message,
+        code: 401
+      };
+    }
+    
     return {
       status: "Error",
       message: "Internal server error",
+      code: 500
     };
   }
 };

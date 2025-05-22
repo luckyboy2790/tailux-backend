@@ -7,22 +7,34 @@ const { putObject } = require("../utils/putObject");
 
 exports.create = async (req) => {
   try {
+    // Ensure authenticated user
+    if (!req.user || !req.user.id) {
+      return {
+        status: "Error",
+        message: "Unauthorized: User not authenticated",
+        code: 401,
+      };
+    }
+
     const { date, reference_no, purchase_id, amount = 0, note = "" } = req.body;
 
+    // Validate required fields
     if (!date || !reference_no || !purchase_id) {
-      throw new Error(
-        "Missing required fields: date, reference_no, or purchase_id"
-      );
+      return {
+        status: "Error",
+        message: "Missing required fields: date, reference_no, or purchase_id",
+        code: 422,
+      };
     }
 
     const timestamp = moment(date).format("YYYY-MM-DD HH:mm:ss");
-    const userRole = req.user?.role || "user";
+    const userRole = req.user.role || "user";
     const status = userRole !== "secretary" ? 1 : 0;
 
     // Fetch related purchase, supplier, and company
     const [purchaseRows] = await db.query(
       `
-      SELECT p.id, s.company AS supplier_company, c.name AS company_name
+      SELECT p.id, s.company AS supplier_company, c.name AS company_name, p.company_id
       FROM purchases p
       LEFT JOIN suppliers s ON p.supplier_id = s.id
       LEFT JOIN companies c ON p.company_id = c.id
@@ -31,9 +43,26 @@ exports.create = async (req) => {
       [purchase_id]
     );
 
-    if (purchaseRows.length === 0) throw new Error("Purchase not found");
+    if (purchaseRows.length === 0) {
+      return {
+        status: "Error",
+        message: "Purchase not found",
+        code: 404,
+      };
+    }
 
     const purchase = purchaseRows[0];
+
+    // Verify user has access to this purchase's company (if not admin)
+    if (userRole !== "admin" && req.user.company_id !== purchase.company_id) {
+      return {
+        status: "Error",
+        message:
+          "You don't have permission to create returns for this purchase",
+        code: 403,
+      };
+    }
+
     const companySlug = slugify(purchase.company_name, { lower: true });
     const supplierSlug = slugify(purchase.supplier_company, { lower: true });
 
@@ -73,14 +102,16 @@ exports.create = async (req) => {
     );
 
     return {
-      status: "success",
+      status: "Success",
       data: createdPreturn[0],
+      message: null,
     };
   } catch (error) {
     console.error(error);
     return {
-      status: "error",
+      status: "Error",
       message: error.message || "Failed to create preturn",
+      code: 500,
     };
   }
 };
@@ -184,7 +215,6 @@ exports.search = async (req) => {
 exports.approve = async (req) => {
   try {
     const { id } = req.params;
-    const userId = req.user?.id;
 
     const [[preturn]] = await db.query("SELECT * FROM preturns WHERE id = ?", [
       id,
@@ -192,30 +222,6 @@ exports.approve = async (req) => {
     if (!preturn) throw new Error("Preturn not found");
 
     await db.query("UPDATE preturns SET status = 1 WHERE id = ?", [id]);
-
-    const [[purchase]] = await db.query(
-      "SELECT company_id, supplier_id, reference_no, amount FROM purchases WHERE id = ?",
-      [preturn.purchase_id]
-    );
-    const [[supplier]] = await db.query(
-      "SELECT company FROM suppliers WHERE id = ?",
-      [purchase.supplier_id]
-    );
-
-    await db.query(
-      `INSERT INTO notifications (user_id, company_id, reference_no, supplier, amount, message, notifiable_id, notifiable_type, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [
-        userId,
-        purchase.company_id,
-        preturn.reference_no,
-        supplier.company,
-        preturn.amount,
-        "preturn_approved",
-        id,
-        "App\\Models\\Preturn",
-      ]
-    );
 
     return {
       status: "success",
