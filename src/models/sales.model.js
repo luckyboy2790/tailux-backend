@@ -777,3 +777,284 @@ exports.update = async (req) => {
     throw new Error(error.message);
   }
 };
+
+exports.allSales = async (req) => {
+  try {
+    if (!req.user || !req.user.id) {
+      throw new Error("Unauthorized: User not authenticated");
+    }
+
+    let query = `
+      SELECT
+        s.*,
+        c.name AS company_name,
+        st.name AS store_name,
+        cu.company AS customer_company,
+        cu.name AS customer_name,
+        cu.email AS customer_email,
+        cu.phone_number AS customer_phone,
+        cu.address AS customer_address,
+        cu.city AS customer_city,
+        u.username AS user_username,
+        u.first_name AS user_first_name,
+        u.last_name AS user_last_name,
+        u.email AS user_email,
+        u.phone_number AS user_phone,
+        u.role AS user_role
+      FROM sales s
+      LEFT JOIN companies c ON s.company_id = c.id
+      LEFT JOIN stores st ON s.store_id = st.id
+      LEFT JOIN customers cu ON s.customer_id = cu.id
+      LEFT JOIN users u ON s.user_id = u.id
+      WHERE 1=1
+    `;
+
+    const params = [];
+
+    if (req.user.role === "user" || req.user.role === "secretary") {
+      query += ` AND s.company_id = ?`;
+      params.push(req.user.company_id);
+    }
+
+    if (req.query) {
+      if (req.query.company_id) {
+        query += ` AND s.company_id = ?`;
+        params.push(req.query.company_id);
+      }
+
+      if (req.query.reference_no) {
+        query += ` AND s.reference_no LIKE ?`;
+        params.push(`%${req.query.reference_no}%`);
+      }
+
+      if (req.query.customer_id) {
+        query += ` AND s.customer_id = ?`;
+        params.push(req.query.customer_id);
+      }
+
+      if (req.query.store_id) {
+        query += ` AND s.store_id = ?`;
+        params.push(req.query.store_id);
+      }
+
+      if (req.query.period) {
+        const period = req.query.period;
+        const from = period.substring(0, 10);
+        const to = period.substring(14, 10);
+
+        if (from && to) {
+          query += ` AND s.timestamp BETWEEN ? AND ?`;
+          params.push(from, to);
+        }
+      }
+
+      if (req.query.startDate && req.query.endDate) {
+        if (req.query.startDate === req.query.endDate) {
+          query += ` AND DATE(s.timestamp) = ?`;
+          params.push(req.query.startDate);
+        } else {
+          query += ` AND s.timestamp BETWEEN ? AND ?`;
+          params.push(req.query.startDate, req.query.endDate);
+        }
+      }
+
+      if (req.query.keyword) {
+        const keywordLike = `%${req.query.keyword}%`;
+
+        const [companyIds] = await db.query(
+          `SELECT id FROM companies WHERE name LIKE ?`,
+          [keywordLike]
+        );
+
+        const [customerIds] = await db.query(
+          `SELECT id FROM customers WHERE company LIKE ?`,
+          [keywordLike]
+        );
+
+        const [storeIds] = await db.query(
+          `SELECT id FROM stores WHERE name LIKE ?`,
+          [keywordLike]
+        );
+
+        const companyIdList = companyIds.map((item) => item.id);
+        const customerIdList = customerIds.map((item) => item.id);
+        const storeIdList = storeIds.map((item) => item.id);
+
+        query += ` AND (
+          s.reference_no LIKE ? OR
+          s.timestamp LIKE ? OR
+          s.grand_total LIKE ?`;
+
+        params.push(keywordLike, keywordLike, keywordLike);
+
+        if (companyIdList.length > 0) {
+          query += ` OR s.company_id IN (${companyIdList
+            .map(() => "?")
+            .join(",")})`;
+          params.push(...companyIdList);
+        }
+
+        if (customerIdList.length > 0) {
+          query += ` OR s.customer_id IN (${customerIdList
+            .map(() => "?")
+            .join(",")})`;
+          params.push(...customerIdList);
+        }
+
+        if (storeIdList.length > 0) {
+          query += ` OR s.store_id IN (${storeIdList
+            .map(() => "?")
+            .join(",")})`;
+          params.push(...storeIdList);
+        }
+
+        query += `)`;
+      }
+    }
+
+    const sortByDate = req.query?.sort_by_date || "desc";
+    query += ` ORDER BY s.timestamp ${sortByDate === "asc" ? "ASC" : "DESC"}`;
+
+    const [salesRows] = await db.query(query, params);
+
+    if (!salesRows.length) {
+      return {
+        status: "success",
+        data: [],
+      };
+    }
+
+    const saleIds = salesRows.map((row) => row.id);
+
+    const [orders] = await db.query(
+      `SELECT o.*, o.orderable_id AS sale_id,
+              p.name AS product_name,
+              p.code AS product_code,
+              p.unit AS product_unit,
+              p.cost AS product_cost,
+              p.price AS product_price
+       FROM orders o
+       LEFT JOIN products p ON o.product_id = p.id
+       WHERE o.orderable_type = 'App\\\\Models\\\\Sale'
+         AND o.orderable_id IN (${saleIds.map(() => "?").join(",")})
+      `,
+      saleIds
+    );
+
+    const [payments] = await db.query(
+      `SELECT *, paymentable_id AS sale_id
+       FROM payments
+       WHERE paymentable_type = 'App\\\\Models\\\\Sale'
+         AND paymentable_id IN (${saleIds.map(() => "?").join(",")})
+      `,
+      saleIds
+    );
+
+    const [images] = await db.query(
+      `SELECT *, imageable_id AS sale_id,
+              CONCAT('http://your-domain.com/storage', path) AS src,
+              'image' AS type
+       FROM images
+       WHERE imageable_type = 'App\\\\Models\\\\Sale'
+         AND imageable_id IN (${saleIds.map(() => "?").join(",")})
+      `,
+      saleIds
+    );
+
+    const mapById = (items, key = "sale_id") => {
+      const map = {};
+      for (const item of items) {
+        const id = item[key];
+        if (!map[id]) map[id] = [];
+        map[id].push(item);
+      }
+      return map;
+    };
+
+    const orderMap = mapById(orders);
+    const paymentMap = mapById(payments);
+    const imageMap = mapById(images);
+
+    const enrichedSales = salesRows.map((row) => {
+      const totalPaid = (paymentMap[row.id] || []).reduce(
+        (sum, p) => sum + parseFloat(p.amount),
+        0
+      );
+
+      return {
+        ...row,
+        total_amount: row.grand_total,
+        paid_amount: totalPaid,
+        orders: (orderMap[row.id] || []).map((order) => ({
+          ...order,
+          product: {
+            id: order.product_id,
+            name: order.product_name,
+            code: order.product_code,
+            unit: order.product_unit,
+            cost: order.product_cost,
+            price: order.product_price,
+          },
+        })),
+        payments: paymentMap[row.id] || [],
+        images: imageMap[row.id] || [],
+        company: {
+          id: row.company_id,
+          name: row.company_name,
+        },
+        customer: {
+          id: row.customer_id,
+          name: row.customer_name,
+          company: row.customer_company,
+          email: row.customer_email,
+          phone_number: row.customer_phone,
+          address: row.customer_address,
+          city: row.customer_city,
+        },
+        store: {
+          id: row.store_id,
+          name: row.store_name,
+          company: {
+            id: row.company_id,
+            name: row.company_name,
+          },
+        },
+        user: {
+          id: row.user_id,
+          username: row.user_username,
+          first_name: row.user_first_name,
+          last_name: row.user_last_name,
+          email: row.user_email,
+          phone_number: row.user_phone,
+          role: row.user_role,
+          name: `${row.user_first_name || ""} ${
+            row.user_last_name || ""
+          }`.trim(),
+        },
+      };
+    });
+
+    return {
+      status: "success",
+      data: enrichedSales,
+    };
+  } catch (error) {
+    console.error(error);
+
+    if (error.message.includes("Unauthorized")) {
+      return {
+        status: "error",
+        message: error.message,
+        code: 401,
+        data: [],
+      };
+    }
+
+    return {
+      status: "error",
+      message: "Failed to retrieve sales",
+      code: 500,
+      data: [],
+    };
+  }
+};

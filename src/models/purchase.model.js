@@ -318,6 +318,14 @@ exports.searchPendingPurchases = async (req) => {
 
     const params = [];
 
+    if (
+      req.user &&
+      (req.user.role === "user" || req.user.role === "secretary")
+    ) {
+      query += ` AND p.company_id = ?`;
+      params.push(req.user.company_id);
+    }
+
     if (company_id) {
       query += ` AND p.company_id = ?`;
       params.push(company_id);
@@ -626,6 +634,10 @@ exports.create = async (req) => {
       );
     }
 
+    if (!req.user || !req.user.id) {
+      throw new Error("Unauthorized: User not authenticated");
+    }
+
     const orders = JSON.parse(orders_json || "[]");
 
     if (orders.length === 0) {
@@ -642,8 +654,9 @@ exports.create = async (req) => {
     }
 
     const timestamp = moment(date).format("YYYY-MM-DD HH:mm:ss");
-    const user_id = req.user?.id || 1;
-    const user_role = req.user?.role || "user";
+
+    const user_id = req.user.id;
+    const user_role = req.user.role;
 
     const [storeData] = await db.query(
       `SELECT company_id FROM stores WHERE id = ?`,
@@ -757,7 +770,33 @@ exports.create = async (req) => {
     };
   } catch (error) {
     console.error(error);
-    throw new Error(error.message);
+
+    // Return structured error response similar to PHP version
+    if (
+      error.message.includes("Missing required fields") ||
+      error.message.includes("Please select at least one product") ||
+      error.message.includes("Reference number already taken")
+    ) {
+      return {
+        status: "error",
+        message: error.message,
+        code: 422,
+      };
+    }
+
+    if (error.message.includes("Unauthorized")) {
+      return {
+        status: "error",
+        message: error.message,
+        code: 401,
+      };
+    }
+
+    return {
+      status: "error",
+      message: error.message,
+      code: 500,
+    };
   }
 };
 
@@ -786,6 +825,11 @@ exports.update = async (req) => {
       );
     }
 
+    // Ensure authenticated user
+    if (!req.user || !req.user.id) {
+      throw new Error("Unauthorized: User not authenticated");
+    }
+
     const orders = JSON.parse(orders_json);
 
     if (orders.length === 0) {
@@ -798,6 +842,26 @@ exports.update = async (req) => {
     );
     if (duplicate.length > 0) {
       throw new Error("Reference number already taken");
+    }
+
+    // Check if purchase exists and user has permission to edit it
+    const [purchaseRow] = await db.query(
+      "SELECT * FROM purchases WHERE id = ?",
+      [id]
+    );
+
+    if (purchaseRow.length === 0) {
+      throw new Error("Purchase not found");
+    }
+
+    // If user is not admin and trying to edit a purchase from another company
+    if (
+      req.user.role !== "admin" &&
+      purchaseRow[0].company_id !== req.user.company_id
+    ) {
+      throw new Error(
+        "Unauthorized: You don't have permission to edit this purchase"
+      );
     }
 
     const [storeRow] = await db.query(
@@ -862,6 +926,7 @@ exports.update = async (req) => {
         const file = attachments[i];
         const ext = path.extname(file.name);
         const filename = `${company_name}_${reference_no}_${supplier_slug}_${date_time}_${i}${ext}`;
+
         const { key } = await putObject(file.data, `purchases/${filename}`);
 
         await db.query(
@@ -870,8 +935,6 @@ exports.update = async (req) => {
         );
       }
     }
-
-    console.log(id);
 
     const [existingOrders] = await db.query(
       `SELECT id FROM orders WHERE orderable_id = ? AND orderable_type = 'App\\\\Models\\\\Purchase'`,
@@ -962,15 +1025,55 @@ exports.update = async (req) => {
     };
   } catch (error) {
     console.error(error);
-    throw new Error(error.message);
+
+    // Return structured error response similar to PHP version
+    if (
+      error.message.includes("Missing required fields") ||
+      error.message.includes("Please select at least one product") ||
+      error.message.includes("Reference number already taken")
+    ) {
+      return {
+        status: "error",
+        message: error.message,
+        code: 422,
+      };
+    }
+
+    if (error.message.includes("Unauthorized")) {
+      return {
+        status: "error",
+        message: error.message,
+        code: 401,
+      };
+    }
+
+    if (error.message.includes("not found")) {
+      return {
+        status: "error",
+        message: error.message,
+        code: 404,
+      };
+    }
+
+    return {
+      status: "error",
+      message: error.message,
+      code: 500,
+    };
   }
 };
 
 exports.delete = async (req) => {
   try {
     const { id } = req.params;
-    const userId = req.user?.id;
-    const userRole = "admin";
+
+    // Ensure authenticated user
+    if (!req.user || !req.user.id) {
+      throw new Error("Unauthorized: User not authenticated");
+    }
+
+    const userId = req.user.id;
+    const userRole = req.user.role;
 
     if (!id) {
       throw new Error("Missing purchase ID");
@@ -992,6 +1095,11 @@ exports.delete = async (req) => {
       throw new Error("You are not allowed to perform this action");
     }
 
+    // Check if user belongs to the same company (unless admin)
+    if (userRole !== "admin" && purchase.company_id !== req.user.company_id) {
+      throw new Error("You don't have permission to delete this purchase");
+    }
+
     await db.query(
       `DELETE FROM orders WHERE orderable_id = ? AND orderable_type = 'App\\\\Models\\\\Purchase'`,
       [id]
@@ -1003,6 +1111,14 @@ exports.delete = async (req) => {
     await db.query(`DELETE FROM purchases WHERE id = ?`, [id]);
 
     if (purchase.status === 0 && userRole === "admin") {
+      // Get supplier name
+      const [[supplierData]] = await db.query(
+        `SELECT company FROM suppliers WHERE id = ?`,
+        [purchase.supplier_id]
+      );
+
+      const supplierName = supplierData?.company || "";
+
       await db.query(
         `INSERT INTO notifications (user_id, company_id, reference_no, supplier, amount, message, notifiable_id, notifiable_type, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
@@ -1010,7 +1126,7 @@ exports.delete = async (req) => {
           userId,
           purchase.company_id,
           purchase.reference_no,
-          purchase.supplier || "",
+          supplierName,
           purchase.grand_total,
           "purchase_rejected",
           purchase.id,
@@ -1022,16 +1138,55 @@ exports.delete = async (req) => {
     return { status: "success" };
   } catch (error) {
     console.error(error);
+
+    // Return structured error response
+    if (error.message.includes("Missing purchase ID")) {
+      return {
+        status: "error",
+        message: error.message,
+        code: 422,
+      };
+    }
+
+    if (
+      error.message.includes("Unauthorized") ||
+      error.message.includes("not allowed") ||
+      error.message.includes("don't have permission")
+    ) {
+      return {
+        status: "error",
+        message: error.message,
+        code: 403,
+      };
+    }
+
+    if (error.message.includes("not found")) {
+      return {
+        status: "error",
+        message: error.message,
+        code: 404,
+      };
+    }
+
     return {
       status: "error",
       message: error.message,
+      code: 500,
     };
   }
 };
 
-exports.allPurchase = async () => {
+exports.allPurchase = async (req) => {
   try {
-    const [purchaseRows] = await db.query(`
+    // Ensure authenticated user
+    if (!req.user || !req.user.id) {
+      throw new Error("Unauthorized: User not authenticated");
+    }
+
+    console.log(req.query);
+
+    // Build query with filters
+    let query = `
       SELECT
         p.*,
         s.id AS supplier_id,
@@ -1060,9 +1215,121 @@ exports.allPurchase = async () => {
       LEFT JOIN stores st ON st.id = p.store_id
       LEFT JOIN companies c ON c.id = p.company_id
       LEFT JOIN users u ON u.id = p.user_id
-      WHERE p.status = 1
-      ORDER BY p.timestamp DESC
-    `);
+      WHERE 1=1
+    `;
+
+    const params = [];
+
+    // Role-based filtering
+    if (req.user.role === "user" || req.user.role === "secretary") {
+      query += ` AND p.company_id = ?`;
+      params.push(req.user.company_id);
+    }
+
+    // Status filtering based on role
+    if (req.user.role !== "secretary") {
+      query += ` AND p.status = 1`;
+    }
+
+    // Additional filters from query parameters if provided
+    if (req.query) {
+      // Company filter
+      if (req.query.company_id) {
+        query += ` AND p.company_id = ?`;
+        params.push(req.query.company_id);
+      }
+
+      // Date range filter
+      if (req.query.startDate && req.query.endDate) {
+        if (req.query.startDate === req.query.endDate) {
+          query += ` AND DATE(p.timestamp) = ?`;
+          params.push(req.query.startDate);
+        } else {
+          query += ` AND p.timestamp BETWEEN ? AND ?`;
+          params.push(req.query.startDate, req.query.endDate);
+        }
+      }
+
+      // Expiry date range filter
+      if (req.query.expiryStartDate && req.query.expiryEndDate) {
+        if (req.query.expiryStartDate === req.query.expiryEndDate) {
+          query += ` AND DATE(p.expiry_date) = ?`;
+          params.push(req.query.expiryStartDate);
+        } else {
+          query += ` AND p.expiry_date BETWEEN ? AND ?`;
+          params.push(req.query.expiryStartDate, req.query.expiryEndDate);
+        }
+      }
+
+      // Keyword search
+      if (req.query.keyword) {
+        // First get IDs from related tables
+        const keywordLike = `%${req.query.keyword}%`;
+
+        const [companyIds] = await db.query(
+          `SELECT id FROM companies WHERE name LIKE ?`,
+          [keywordLike]
+        );
+
+        const [supplierIds] = await db.query(
+          `SELECT id FROM suppliers WHERE company LIKE ?`,
+          [keywordLike]
+        );
+
+        const [storeIds] = await db.query(
+          `SELECT id FROM stores WHERE name LIKE ?`,
+          [keywordLike]
+        );
+
+        const companyIdList = companyIds.map((item) => item.id);
+        const supplierIdList = supplierIds.map((item) => item.id);
+        const storeIdList = storeIds.map((item) => item.id);
+
+        query += ` AND (
+          p.reference_no LIKE ? OR
+          p.timestamp LIKE ? OR
+          p.grand_total LIKE ?`;
+
+        params.push(keywordLike, keywordLike, keywordLike);
+
+        // Add company ID conditions if there are any matches
+        if (companyIdList.length > 0) {
+          query += ` OR p.company_id IN (${companyIdList
+            .map(() => "?")
+            .join(",")})`;
+          params.push(...companyIdList);
+        }
+
+        // Add supplier ID conditions if there are any matches
+        if (supplierIdList.length > 0) {
+          query += ` OR p.supplier_id IN (${supplierIdList
+            .map(() => "?")
+            .join(",")})`;
+          params.push(...supplierIdList);
+        }
+
+        // Add store ID conditions if there are any matches
+        if (storeIdList.length > 0) {
+          query += ` OR p.store_id IN (${storeIdList
+            .map(() => "?")
+            .join(",")})`;
+          params.push(...storeIdList);
+        }
+
+        query += `)`;
+      }
+
+      // Sort by date
+      const sort_by_date = req.query.sort_by_date || "desc";
+      query += ` ORDER BY p.timestamp ${
+        sort_by_date === "asc" ? "ASC" : "DESC"
+      }`;
+    } else {
+      // Default ordering
+      query += ` ORDER BY p.timestamp DESC`;
+    }
+
+    const [purchaseRows] = await db.query(query, params);
 
     const purchaseIds = purchaseRows.map((r) => r.id);
     if (!purchaseIds.length) return [];
@@ -1198,6 +1465,22 @@ exports.allPurchase = async () => {
     });
   } catch (error) {
     console.error(error);
-    return [];
+
+    // Return structured error response
+    if (error.message.includes("Unauthorized")) {
+      return {
+        status: "error",
+        message: error.message,
+        code: 401,
+        data: [],
+      };
+    }
+
+    return {
+      status: "error",
+      message: "Failed to retrieve purchases",
+      code: 500,
+      data: [],
+    };
   }
 };

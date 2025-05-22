@@ -59,7 +59,7 @@ exports.deletePurchase = async (req, res) => {
 
 exports.totalPurchase = async (req, res) => {
   try {
-    const purchase = await Purchase.allPurchase();
+    const purchase = await Purchase.allPurchase(req);
 
     res.json(purchase);
   } catch (error) {

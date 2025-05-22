@@ -48,3 +48,14 @@ exports.deleteSale = async (req, res) => {
     res.status(500).json({ error: "Server Error" });
   }
 };
+
+exports.totalSales = async (req, res) => {
+  try {
+    const sales = await Sales.allSales(req);
+
+    res.json(sales);
+  } catch (error) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
+
