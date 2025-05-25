@@ -66,3 +66,14 @@ exports.totalPurchase = async (req, res) => {
     res.status(500).json({ error: "Server Error" });
   }
 };
+
+exports.approvePurchase = async (req, res) => {
+  try {
+    const purchase = await Purchase.approve(req);
+
+    res.json(purchase);
+  } catch (error) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
+

@@ -403,7 +403,7 @@ exports.searchPendingPurchases = async (req) => {
           prod.alert_quantity AS product_alert_quantity
         FROM orders o
         LEFT JOIN products prod ON o.product_id = prod.id
-        WHERE o.orderable_id = ? AND o.orderable_type = 'purchase'
+        WHERE o.orderable_id = ? AND o.orderable_type = 'App\\\\Models\\\\Purchase'
       `,
         [purchase.id]
       );
@@ -424,7 +424,7 @@ exports.searchPendingPurchases = async (req) => {
       const [payments] = await db.query(
         `
         SELECT * FROM payments
-        WHERE paymentable_id = ? AND paymentable_type = 'purchase'
+        WHERE paymentable_id = ? AND paymentable_type = 'App\\\\Models\\\\Purchase'
       `,
         [purchase.id]
       );
@@ -445,7 +445,7 @@ exports.searchPendingPurchases = async (req) => {
           CONCAT('http://your-domain.com/storage', path) AS src,
           'image' AS type
         FROM images
-        WHERE imageable_id = ? AND imageable_type = 'purchase'
+        WHERE imageable_id = ? AND imageable_type = 'App\\\\Models\\\\Purchase'
       `,
         [purchase.id]
       );
@@ -1481,6 +1481,77 @@ exports.allPurchase = async (req) => {
       message: "Failed to retrieve purchases",
       code: 500,
       data: [],
+    };
+  }
+};
+
+exports.approve = async (req) => {
+  try {
+    const user = req.user;
+    const id = req.params.id || req.body.id;
+
+    if (!user || !user.id) {
+      throw new Error("Unauthorized: User not authenticated");
+    }
+
+    const allowed = ["user", "admin"];
+    if (!allowed.includes(user.role)) {
+      return {
+        status: "error",
+        message: "You are not allowed to access this page",
+        code: 403,
+      };
+    }
+
+    const [purchaseRows] = await db.query(
+      `SELECT * FROM purchases WHERE id = ? LIMIT 1`,
+      [id]
+    );
+
+    if (purchaseRows.length === 0) {
+      return {
+        status: "error",
+        message: "Purchase not found",
+        code: 404,
+      };
+    }
+
+    const purchase = purchaseRows[0];
+
+    await db.query(`UPDATE purchases SET status = 1 WHERE id = ?`, [id]);
+
+    const [supplierRows] = await db.query(
+      `SELECT company FROM suppliers WHERE id = ? LIMIT 1`,
+      [purchase.supplier_id]
+    );
+
+    const supplierCompany = supplierRows[0]?.company || "";
+
+    await db.query(
+      `INSERT INTO notifications (user_id, company_id, reference_no, message, supplier, amount, notifiable_id, notifiable_type, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        user.id,
+        purchase.company_id,
+        purchase.reference_no,
+        "purchase_approved",
+        supplierCompany,
+        purchase.grand_total,
+        purchase.id,
+        "App\\Models\\Purchase",
+      ]
+    );
+
+    return {
+      status: "success",
+      purchase_id: purchase.id,
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "error",
+      message: error.message,
+      code: 500,
     };
   }
 };

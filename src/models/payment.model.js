@@ -11,7 +11,7 @@ exports.searchPending = async (req) => {
     if (!req.user || !req.user.id) {
       throw new Error("Unauthorized: User not authenticated");
     }
-    
+
     const {
       page = 1,
       per_page = 10,
@@ -44,28 +44,28 @@ exports.searchPending = async (req) => {
 
     // Apply company filter based on user role
     let userCompanyId = "";
-    if (req.user.role === 'user' || req.user.role === 'secretary') {
+    if (req.user.role === "user" || req.user.role === "secretary") {
       userCompanyId = req.user.company_id;
     }
-    
+
     // Use company_id from query params if provided, otherwise use user's company_id
     const effectiveCompanyId = company_id || userCompanyId;
-    
+
     if (effectiveCompanyId) {
       // Get purchases and sales for the company to filter payments
       const [companyPurchases] = await db.query(
         `SELECT id FROM purchases WHERE company_id = ?`,
         [effectiveCompanyId]
       );
-      
+
       const [companySales] = await db.query(
         `SELECT id FROM sales WHERE company_id = ?`,
         [effectiveCompanyId]
       );
-      
-      const purchaseIds = companyPurchases.map(p => p.id);
-      const saleIds = companySales.map(s => s.id);
-      
+
+      const purchaseIds = companyPurchases.map((p) => p.id);
+      const saleIds = companySales.map((s) => s.id);
+
       // No purchases or sales found for company
       if (purchaseIds.length === 0 && saleIds.length === 0) {
         return {
@@ -88,11 +88,11 @@ exports.searchPending = async (req) => {
           message: null,
         };
       }
-      
+
       // Get payment IDs for purchases and sales of this company
       let purchasePaymentIds = [];
       let salePaymentIds = [];
-      
+
       if (purchaseIds.length > 0) {
         const [purchasePayments] = await db.query(
           `SELECT id FROM payments 
@@ -100,9 +100,9 @@ exports.searchPending = async (req) => {
            AND paymentable_id IN (${purchaseIds.map(() => "?").join(",")})`,
           purchaseIds
         );
-        purchasePaymentIds = purchasePayments.map(p => p.id);
+        purchasePaymentIds = purchasePayments.map((p) => p.id);
       }
-      
+
       if (saleIds.length > 0) {
         const [salePayments] = await db.query(
           `SELECT id FROM payments 
@@ -110,15 +110,17 @@ exports.searchPending = async (req) => {
            AND paymentable_id IN (${saleIds.map(() => "?").join(",")})`,
           saleIds
         );
-        salePaymentIds = salePayments.map(p => p.id);
+        salePaymentIds = salePayments.map((p) => p.id);
       }
-      
+
       const companyPaymentIds = [...purchasePaymentIds, ...salePaymentIds];
-      
+
       if (companyPaymentIds.length > 0) {
         query += ` AND p.id IN (${companyPaymentIds.map(() => "?").join(",")})`;
-        countQuery += ` AND p.id IN (${companyPaymentIds.map(() => "?").join(",")})`;
-        
+        countQuery += ` AND p.id IN (${companyPaymentIds
+          .map(() => "?")
+          .join(",")})`;
+
         params.push(...companyPaymentIds);
         countParams.push(...companyPaymentIds);
       } else {
@@ -294,20 +296,20 @@ exports.searchPending = async (req) => {
     return response;
   } catch (error) {
     console.error(error);
-    
+
     // Return structured error response
     if (error.message.includes("Unauthorized")) {
       return {
         status: "Error",
         message: error.message,
-        code: 401
+        code: 401,
       };
     }
-    
+
     return {
       status: "Error",
       message: "Internal server error",
-      code: 500
+      code: 500,
     };
   }
 };
@@ -551,10 +553,9 @@ exports.delete = async (req) => {
 
       await db.query(
         `INSERT INTO notifications
-        (user_id, company_id, reference_no, supplier, amount, message, notifiable_id, notifiable_type, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        (company_id, reference_no, supplier, amount, message, notifiable_id, notifiable_type, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
         [
-          userId,
           paymentable.company_id,
           payment.reference_no,
           supplier,
@@ -645,7 +646,6 @@ exports.search = async (req) => {
 exports.approve = async (req) => {
   try {
     const paymentId = req.params.id;
-    const userId = req.user?.id;
 
     const [paymentRows] = await db.query(
       `SELECT * FROM payments WHERE id = ?`,
@@ -692,12 +692,11 @@ exports.approve = async (req) => {
 
     await db.query(
       `INSERT INTO notifications (
-        user_id, company_id, reference_no, message,
+         company_id, reference_no, message,
         supplier, amount, notifiable_id, notifiable_type,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
-        userId,
         companyId,
         payment.reference_no,
         "payment_approved",

@@ -15,5 +15,6 @@ router.post("/create", verifyToken, purchaseController.createPurchase);
 router.post("/update", verifyToken, purchaseController.updatePurchase);
 router.post("/delete/:id", verifyToken, purchaseController.deletePurchase);
 router.get("/get_all", verifyToken, purchaseController.totalPurchase);
+router.post("/approve/:id", verifyToken, purchaseController.approvePurchase);
 
 module.exports = router;
