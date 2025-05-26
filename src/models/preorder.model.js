@@ -1,9 +1,17 @@
 const db = require("../config/db");
 
-exports.searchPreOrders = async (filters) => {
+exports.searchPreOrders = async (req) => {
   try {
+    const authUser = req.user;
+    const filters = req.query;
+
     const values = [];
     const filterConditions = [];
+
+    if (authUser.company_id) {
+      filterConditions.push("po.company_id = ?");
+      values.push(authUser.company_id);
+    }
 
     if (filters.company_id) {
       filterConditions.push("po.company_id = ?");
@@ -45,12 +53,19 @@ exports.searchPreOrders = async (filters) => {
         (
           po.reference_no LIKE ?
           OR po.grand_total LIKE ?
+          OR po.timestamp LIKE ?
           OR po.company_id IN (SELECT id FROM companies WHERE name LIKE ?)
           OR po.supplier_id IN (SELECT id FROM suppliers WHERE company LIKE ?)
         )
       `);
       const keywordLike = `%${filters.keyword}%`;
-      values.push(keywordLike, keywordLike, keywordLike, keywordLike);
+      values.push(
+        keywordLike,
+        keywordLike,
+        keywordLike,
+        keywordLike,
+        keywordLike
+      );
     }
 
     const whereClause = filterConditions.length
@@ -115,7 +130,6 @@ exports.searchPreOrders = async (filters) => {
 
     const enriched = await Promise.all(
       preOrderRows.map(async (row) => {
-        // Get orders (using pre_order_items but named as orders to match structure)
         const [orders] = await db.query(
           `SELECT
             poi.id,
@@ -143,27 +157,21 @@ exports.searchPreOrders = async (filters) => {
           [row.id]
         );
 
-        // Get payments
         const [payments] = await db.query(
           `SELECT * FROM payments
            WHERE paymentable_id = ? AND paymentable_type = 'App\\\\Models\\\\PreOrder'`,
           [row.id]
         );
 
-        // Get images
         const [images] = await db.query(
-          `SELECT *,
-                  CONCAT('http://your-domain.com/storage', path) AS src,
-                  'image' AS type
+          `SELECT *, CONCAT('http://your-domain.com/storage', path) AS src, 'image' AS type
            FROM images
            WHERE imageable_id = ? AND imageable_type = 'App\\\\Models\\\\PreOrder'`,
           [row.id]
         );
 
-        // For pre-orders, we'll return empty array for preturns
         const preturns = [];
 
-        // Get store info from company (since pre_orders doesn't have store_id)
         const [stores] = await db.query(
           `SELECT * FROM stores WHERE company_id = ? LIMIT 1`,
           [row.company_id]

@@ -2,7 +2,7 @@ const PreOrder = require("../models/preorder.model");
 
 exports.getPreOrderSearch = async (req, res) => {
   try {
-    const preOrders = await PreOrder.searchPreOrders(req.query);
+    const preOrders = await PreOrder.searchPreOrders(req);
     res.json(preOrders);
   } catch (err) {
     res.status(500).json({ error: "Server Error" });

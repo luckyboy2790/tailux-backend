@@ -2,7 +2,6 @@ const db = require("../config/db");
 const path = require("path");
 const { v4 } = require("uuid");
 const slugify = require("slugify");
-const moment = require("moment");
 const { putObject } = require("../utils/putObject");
 
 exports.search = async (req) => {

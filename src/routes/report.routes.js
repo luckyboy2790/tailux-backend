@@ -1,10 +1,19 @@
 const express = require("express");
 const router = express.Router();
 const reportController = require("../controllers/report.controller");
+const verifyToken = require("../middlewares/authJWT");
 
-router.get("/overview_chart", reportController.getOverviewChartSearch);
-router.get("/company_chart", reportController.getCompanyChartSearch);
-router.get("/store_chart", reportController.getStoreChartSearch);
+router.get(
+  "/overview_chart",
+  verifyToken,
+  reportController.getOverviewChartSearch
+);
+router.get(
+  "/company_chart",
+  verifyToken,
+  reportController.getCompanyChartSearch
+);
+router.get("/store_chart", verifyToken, reportController.getStoreChartSearch);
 router.get(
   "/product_quantity_alert",
   reportController.getProductQuantityAlertSearch

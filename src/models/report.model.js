@@ -4,6 +4,12 @@ exports.getOverviewChartData = async (req) => {
   try {
     let company_id = 1;
 
+    const authUser = req.user;
+
+    if (authUser.company_id) {
+      company_id = authUser.company_id;
+    }
+
     if (req.query.company_id) {
       company_id = req.query.company_id;
     }
@@ -138,15 +144,25 @@ exports.getOverviewChartData = async (req) => {
 
 exports.getCompanyChartData = async (req) => {
   try {
+    const user = req.user;
+
     let companies = [];
-    let company_names = [];
-    let company_purchases_array = [];
-    let company_sales_array = [];
 
-    const [allCompanies] = await db.query(`SELECT * FROM companies`);
-    companies = allCompanies;
+    if (user?.role === "user" || user?.role === "secretary") {
+      const [[company]] = await db.query(
+        `SELECT * FROM companies WHERE id = ?`,
+        [user.company_id]
+      );
+      if (!company) throw new Error("Company not found for the user");
+      companies = [company];
+    } else {
+      const [allCompanies] = await db.query(`SELECT * FROM companies`);
+      companies = allCompanies;
+    }
 
-    company_names = companies.map((company) => company.name);
+    const company_names = companies.map((company) => company.name);
+    const company_purchases_array = [];
+    const company_sales_array = [];
 
     for (const company of companies) {
       let purchaseQuery = `SELECT id FROM purchases WHERE company_id = ?`;
@@ -224,11 +240,11 @@ exports.getStoreChartData = async (req) => {
     let store_sales_array = [];
 
     let storesQuery = "SELECT * FROM stores";
-    const whereClauses = [];
     const params = [];
 
-    if (whereClauses.length > 0) {
-      storesQuery += " WHERE " + whereClauses.join(" AND ");
+    if (req.user?.role === "user" || req.user?.role === "secretary") {
+      storesQuery += " WHERE company_id = ?";
+      params.push(req.user.company_id);
     }
 
     const [stores] = await db.query(storesQuery, params);
@@ -2060,12 +2076,10 @@ exports.getCustomersReport = async (filters, user = null) => {
     const page = parseInt(filters.page) || 1;
     const offset = (page - 1) * perPage;
 
-    // Count total records
     const countQuery = `SELECT COUNT(*) AS total FROM customers ${whereClause}`;
     const [countResult] = await db.query(countQuery, values);
     const total = countResult[0]?.total || 0;
 
-    // Get paginated customer data
     const customerQuery = `
       SELECT * FROM customers
       ${whereClause}
@@ -2075,13 +2089,11 @@ exports.getCustomersReport = async (filters, user = null) => {
     const customerValues = [...values, perPage, offset];
     const [customerRows] = await db.query(customerQuery, customerValues);
 
-    // Get sales data for customers
     const customerIds = customerRows.map((c) => c.id);
     let salesData = [];
     let paymentData = [];
 
     if (customerIds.length > 0) {
-      // Base sales query with status condition
       let salesQuery = `
         SELECT
           customer_id,
@@ -2095,7 +2107,6 @@ exports.getCustomersReport = async (filters, user = null) => {
 
       let salesParams = [...customerIds];
 
-      // Add company filter if user has a company
       if (user && user.company_id) {
         salesQuery += ` AND company_id = ?`;
         salesParams.push(user.company_id);
@@ -2105,7 +2116,6 @@ exports.getCustomersReport = async (filters, user = null) => {
 
       [salesData] = await db.query(salesQuery, salesParams);
 
-      // Get payment totals for the filtered sales
       if (salesData.length > 0) {
         const saleIds = salesData.flatMap((s) => s.sale_ids.split(","));
 
@@ -2120,7 +2130,6 @@ exports.getCustomersReport = async (filters, user = null) => {
 
         let paymentParams = [...saleIds];
 
-        // Add company filter if user has a company
         if (user && user.company_id) {
           paymentQuery += `
             AND p.paymentable_id IN (
@@ -2136,7 +2145,6 @@ exports.getCustomersReport = async (filters, user = null) => {
       }
     }
 
-    // Create maps for quick lookup
     const salesMap = salesData.reduce((acc, curr) => {
       acc[curr.customer_id] = {
         total_sales: curr.total_sales || 0,
@@ -2152,7 +2160,6 @@ exports.getCustomersReport = async (filters, user = null) => {
       return acc;
     }, {});
 
-    // Enrich customer data with sales and payment info
     const enrichedCustomers = customerRows.map((customer) => ({
       ...customer,
       total_sales: salesMap[customer.id]?.total_sales || 0,
@@ -2160,7 +2167,6 @@ exports.getCustomersReport = async (filters, user = null) => {
       paid_amount: paymentMap[customer.id]?.paid_amount || 0,
     }));
 
-    // Calculate pagination metadata
     const totalPages = Math.ceil(total / perPage);
     const baseUrl = `${process.env.APP_URL}/api/report/customers_report`;
 
@@ -2216,7 +2222,6 @@ exports.getSuppliersReport = async (filters) => {
     const values = [];
     const filterConditions = [];
 
-    // Keyword search
     if (filters.keyword) {
       const keyword = `%${filters.keyword}%`;
       filterConditions.push(`(
@@ -2233,17 +2238,14 @@ exports.getSuppliersReport = async (filters) => {
       ? `WHERE ${filterConditions.join(" AND ")}`
       : "";
 
-    // Pagination
     const perPage = parseInt(filters.per_page) || 15;
     const page = parseInt(filters.page) || 1;
     const offset = (page - 1) * perPage;
 
-    // Count total suppliers
     const countQuery = `SELECT COUNT(*) AS total FROM suppliers s ${whereClause}`;
     const [countResult] = await db.query(countQuery, values);
     const total = countResult[0]?.total || 0;
 
-    // Get suppliers with pagination
     const suppliersQuery = `
       SELECT
         s.*,
@@ -2271,7 +2273,6 @@ exports.getSuppliersReport = async (filters) => {
     const supplierValues = [...values, perPage, offset];
     const [suppliers] = await db.query(suppliersQuery, supplierValues);
 
-    // Calculate pagination metadata
     const totalPages = Math.ceil(total / perPage);
     const baseUrl = `${process.env.APP_URL}/api/report/suppliers_report`;
 
@@ -2310,13 +2311,11 @@ exports.getUsersReport = async (filters) => {
     const values = [];
     const filterConditions = [];
 
-    // Company filter
     if (filters.company_id) {
       filterConditions.push("u.company_id LIKE ?");
       values.push(`%${filters.company_id}%`);
     }
 
-    // Keyword search
     if (filters.keyword) {
       const keyword = `%${filters.keyword}%`;
       filterConditions.push(`(
@@ -2333,17 +2332,14 @@ exports.getUsersReport = async (filters) => {
       ? `WHERE ${filterConditions.join(" AND ")}`
       : "";
 
-    // Pagination
     const perPage = parseInt(filters.per_page) || 15;
     const page = parseInt(filters.page) || 1;
     const offset = (page - 1) * perPage;
 
-    // Count total users
     const countQuery = `SELECT COUNT(*) AS total FROM users u ${whereClause}`;
     const [countResult] = await db.query(countQuery, values);
     const total = countResult[0]?.total || 0;
 
-    // Get users with pagination
     const usersQuery = `
       SELECT
         u.*,
@@ -2364,7 +2360,6 @@ exports.getUsersReport = async (filters) => {
     const userValues = [...values, perPage, offset];
     const [users] = await db.query(usersQuery, userValues);
 
-    // Generate photo URLs and names
     const enrichedUsers = users.map((user) => {
       const name =
         [user.first_name, user.last_name].filter(Boolean).join(" ") ||
@@ -2384,7 +2379,6 @@ exports.getUsersReport = async (filters) => {
       };
     });
 
-    // Calculate pagination metadata
     const totalPages = Math.ceil(total / perPage);
     const baseUrl = `${process.env.APP_URL}/api/report/users_report`;
 
@@ -2419,18 +2413,15 @@ exports.getUsersReport = async (filters) => {
   }
 };
 
-// Helper function to generate pagination links
 function generatePaginationLinks(currentPage, totalPages, baseUrl) {
   const links = [];
 
-  // Previous link
   links.push({
     url: currentPage > 1 ? `${baseUrl}?page=${currentPage - 1}` : null,
     label: "&laquo; Anterior",
     active: false,
   });
 
-  // Always show first page
   if (totalPages > 0) {
     links.push({
       url: `${baseUrl}?page=1`,
@@ -2439,11 +2430,9 @@ function generatePaginationLinks(currentPage, totalPages, baseUrl) {
     });
   }
 
-  // Calculate window of pages around current page
   let startPage = Math.max(2, currentPage - 2);
   let endPage = Math.min(totalPages - 1, currentPage + 2);
 
-  // Add ellipsis if needed after first page
   if (startPage > 2) {
     links.push({
       url: null,
@@ -2452,7 +2441,6 @@ function generatePaginationLinks(currentPage, totalPages, baseUrl) {
     });
   }
 
-  // Add page numbers in window
   for (let i = startPage; i <= endPage; i++) {
     links.push({
       url: `${baseUrl}?page=${i}`,
@@ -2461,7 +2449,6 @@ function generatePaginationLinks(currentPage, totalPages, baseUrl) {
     });
   }
 
-  // Add ellipsis if needed before last page
   if (endPage < totalPages - 1) {
     links.push({
       url: null,
@@ -2470,7 +2457,6 @@ function generatePaginationLinks(currentPage, totalPages, baseUrl) {
     });
   }
 
-  // Always show last page if there's more than one page
   if (totalPages > 1) {
     links.push({
       url: `${baseUrl}?page=${totalPages}`,
@@ -2479,7 +2465,6 @@ function generatePaginationLinks(currentPage, totalPages, baseUrl) {
     });
   }
 
-  // Next link
   links.push({
     url: currentPage < totalPages ? `${baseUrl}?page=${currentPage + 1}` : null,
     label: "Siguiente &raquo;",
