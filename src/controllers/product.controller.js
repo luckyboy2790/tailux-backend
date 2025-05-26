@@ -18,3 +18,33 @@ exports.getTotalProducts = async (req, res) => {
     res.status(500).json({ error: "Server Error" });
   }
 };
+
+exports.createProduct = async (req, res) => {
+  try {
+    const product = await Product.create(req);
+
+    res.json(product);
+  } catch (error) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
+
+exports.updateProduct = async (req, res) => {
+  try {
+    const product = await Product.update(req);
+
+    res.json(product);
+  } catch (error) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
+
+exports.deleteProduct = async (req, res) => {
+  try {
+    const product = await Product.delete(req);
+
+    res.json(product);
+  } catch (error) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
