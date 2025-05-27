@@ -179,3 +179,128 @@ exports.searchCustomers = async (req) => {
     };
   }
 };
+
+exports.create = async (req) => {
+  try {
+    const { name, company, email, phone_number, address, city } = req.body;
+
+    if (!name || typeof name !== "string") {
+      throw new Error("The 'name' field is required and must be a string.");
+    }
+
+    const [existing] = await db.query(
+      "SELECT id FROM customers WHERE name = ? AND phone_number = ?",
+      [name, phone_number || null]
+    );
+    if (existing.length > 0) {
+      throw new Error(
+        "Customer already exists with the same name and phone number."
+      );
+    }
+
+    const [result] = await db.query(
+      `INSERT INTO customers (name, company, email, phone_number, address, city, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        name,
+        company || null,
+        email || null,
+        phone_number || null,
+        address || null,
+        city || null,
+      ]
+    );
+
+    const [customer] = await db.query("SELECT * FROM customers WHERE id = ?", [
+      result.insertId,
+    ]);
+
+    return {
+      status: "success",
+      data: customer[0],
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(error.message || "Failed to create customer");
+  }
+};
+
+exports.update = async (req) => {
+  try {
+    const { id, name, company, email, phone_number, address, city } = req.body;
+
+    if (!id || !name || typeof name !== "string") {
+      throw new Error("The 'id' and 'name' fields are required.");
+    }
+
+    const [existing] = await db.query("SELECT * FROM customers WHERE id = ?", [
+      id,
+    ]);
+    if (existing.length === 0) {
+      throw new Error("Customer not found.");
+    }
+
+    await db.query(
+      `UPDATE customers
+       SET name = ?, company = ?, email = ?, phone_number = ?, address = ?, city = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [
+        name,
+        company || null,
+        email || null,
+        phone_number || null,
+        address || null,
+        city || null,
+        id,
+      ]
+    );
+
+    const [updated] = await db.query("SELECT * FROM customers WHERE id = ?", [
+      id,
+    ]);
+
+    return {
+      status: "success",
+      data: updated[0],
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(error.message || "Failed to update customer");
+  }
+};
+
+exports.delete = async (req) => {
+  try {
+    const { id } = req.params;
+
+    const [customerRows] = await db.query(
+      "SELECT * FROM customers WHERE id = ?",
+      [id]
+    );
+    if (customerRows.length === 0) {
+      throw new Error("Customer not found.");
+    }
+
+    const [sales] = await db.query(
+      "SELECT id FROM sales WHERE customer_id = ?",
+      [id]
+    );
+    if (sales.length > 0) {
+      return {
+        status: "error",
+        message: "Customer has associated sales and cannot be deleted.",
+        data: null,
+      };
+    }
+
+    await db.query("DELETE FROM customers WHERE id = ?", [id]);
+
+    return {
+      status: "success",
+      data: null,
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(error.message || "Failed to delete customer");
+  }
+};
