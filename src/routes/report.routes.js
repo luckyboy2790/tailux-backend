@@ -20,16 +20,22 @@ router.get(
 );
 router.get(
   "/product_expiry_alert",
+  verifyToken,
   reportController.getProductExpiryAlertSearch
 );
 router.get("/product", reportController.getProductReportSearch);
 router.get(
   "/expired_purchases_report",
+  verifyToken,
   reportController.getExpiredPurchasesReportSearch
 );
-router.get("/sales", reportController.getSalesReportSearch);
-router.get("/purchases", reportController.getPurchasesReportSearch);
-router.get("/payments", reportController.getPaymentsReportSearch);
+router.get("/sales", verifyToken, reportController.getSalesReportSearch);
+router.get(
+  "/purchases",
+  verifyToken,
+  reportController.getPurchasesReportSearch
+);
+router.get("/payments", verifyToken, reportController.getPaymentsReportSearch);
 router.get("/customers", reportController.getCustomersReportSearch);
 router.get("/suppliers", reportController.getSuppliersReportSearch);
 router.get("/users", reportController.getUsersReportSearch);

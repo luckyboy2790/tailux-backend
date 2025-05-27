@@ -56,7 +56,7 @@ exports.getProductReportSearch = async (req, res) => {
 
 exports.getExpiredPurchasesReportSearch = async (req, res) => {
   try {
-    const storeData = await Report.getExpiredPurchasesReport(req.query);
+    const storeData = await Report.getExpiredPurchasesReport(req);
     res.json(storeData);
   } catch (err) {
     res.status(500).json({ error: "Server Error" });
@@ -83,7 +83,7 @@ exports.getPurchasesReportSearch = async (req, res) => {
 
 exports.getPaymentsReportSearch = async (req, res) => {
   try {
-    const storeData = await Report.getPaymentsReport(req.query);
+    const storeData = await Report.getPaymentsReport(req);
     res.json(storeData);
   } catch (err) {
     res.status(500).json({ error: "Server Error" });
