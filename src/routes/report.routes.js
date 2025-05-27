@@ -38,6 +38,6 @@ router.get(
 router.get("/payments", verifyToken, reportController.getPaymentsReportSearch);
 router.get("/customers", reportController.getCustomersReportSearch);
 router.get("/suppliers", reportController.getSuppliersReportSearch);
-router.get("/users", reportController.getUsersReportSearch);
+router.get("/users", verifyToken, reportController.getUsersReportSearch);
 
 module.exports = router;

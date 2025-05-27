@@ -1802,10 +1802,16 @@ exports.getSuppliersReport = async (filters) => {
   }
 };
 
-exports.getUsersReport = async (filters) => {
+exports.getUsersReport = async (filters, authUser) => {
   try {
     const values = [];
     const filterConditions = [];
+
+    // Auth-based role restriction
+    if (authUser.role === "user") {
+      filterConditions.push("u.company_id = ?");
+      values.push(authUser.company_id);
+    }
 
     if (filters.company_id) {
       filterConditions.push("u.company_id LIKE ?");
@@ -1828,8 +1834,8 @@ exports.getUsersReport = async (filters) => {
       ? `WHERE ${filterConditions.join(" AND ")}`
       : "";
 
-    const perPage = parseInt(filters.per_page) || 15;
-    const page = parseInt(filters.page) || 1;
+    const perPage = parseInt(filters.per_page, 10) || 15;
+    const page = parseInt(filters.page, 10) || 1;
     const offset = (page - 1) * perPage;
 
     const countQuery = `SELECT COUNT(*) AS total FROM users u ${whereClause}`;
@@ -1863,7 +1869,7 @@ exports.getUsersReport = async (filters) => {
 
       return {
         ...user,
-        name: name,
+        name,
         company: user.company_id
           ? {
               id: user.company_id,
@@ -1891,7 +1897,7 @@ exports.getUsersReport = async (filters) => {
       per_page: perPage,
       prev_page_url: page > 1 ? `${baseUrl}?page=${page - 1}` : null,
       to: Math.min(offset + perPage, total),
-      total: total,
+      total,
     };
 
     return {
