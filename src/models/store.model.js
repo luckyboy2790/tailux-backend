@@ -195,3 +195,85 @@ exports.getStores = async (req) => {
     };
   }
 };
+
+// controllers/storeController.js
+
+exports.create = async (req) => {
+  try {
+    const { name, company } = req.body;
+
+    if (!name || !company) {
+      throw new Error("'name' and 'company' are required.");
+    }
+
+    const [result] = await db.query(
+      "INSERT INTO stores (name, company_id, created_at, updated_at) VALUES (?, ?, NOW(), NOW())",
+      [name, company]
+    );
+
+    const [store] = await db.query("SELECT * FROM stores WHERE id = ?", [
+      result.insertId,
+    ]);
+
+    return {
+      status: "success",
+      data: store[0],
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(error.message || "Failed to create store");
+  }
+};
+
+exports.update = async (req) => {
+  try {
+    const { id, name, company } = req.body;
+
+    if (!id || !name || !company) {
+      throw new Error("'id', 'name', and 'company' are required.");
+    }
+
+    const [existing] = await db.query("SELECT * FROM stores WHERE id = ?", [
+      id,
+    ]);
+
+    if (existing.length === 0) {
+      throw new Error("Store not found.");
+    }
+
+    await db.query(
+      "UPDATE stores SET name = ?, company_id = ?, updated_at = NOW() WHERE id = ?",
+      [name, company, id]
+    );
+
+    const [updated] = await db.query("SELECT * FROM stores WHERE id = ?", [id]);
+
+    return {
+      status: "success",
+      data: updated[0],
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(error.message || "Failed to update store");
+  }
+};
+
+exports.delete = async (req) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      throw new Error("'id' is required.");
+    }
+
+    await db.query("DELETE FROM stores WHERE id = ?", [id]);
+
+    return {
+      status: "success",
+      message: "Store deleted successfully",
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(error.message || "Failed to delete store");
+  }
+};
