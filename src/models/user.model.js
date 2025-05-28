@@ -1,4 +1,5 @@
 const db = require("../config/db");
+const bcrypt = require("bcrypt");
 
 exports.findAll = async () => {
   const [rows] = await db.query("SELECT * FROM users");
@@ -168,5 +169,177 @@ exports.getUserById = async (req) => {
       message: "Failed to fetch user",
       data: null,
     };
+  }
+};
+
+exports.create = async (req) => {
+  try {
+    const {
+      username,
+      first_name,
+      last_name,
+      phone_number,
+      ip_address,
+      role,
+      company_id,
+      password,
+      enable_google2fa,
+    } = req.body;
+
+    console.log(req.body);
+
+    const errors = [];
+
+    if (!username) errors.push("'username' is required.");
+    if (!role) errors.push("'role' is required.");
+    if (!phone_number) errors.push("'phone_number' is required.");
+    if (!password) errors.push("'password' is required.");
+    if (!enable_google2fa) errors.push("'enable_google2fa' is required.");
+
+    if (["user", "secretary"].includes(role) && !company_id) {
+      errors.push("'company_id' is required for user/secretary roles.");
+    }
+
+    const [exists] = await db.query("SELECT id FROM users WHERE username = ?", [
+      username,
+    ]);
+    if (exists.length > 0) {
+      errors.push("Username already exists.");
+    }
+
+    if (errors.length > 0) {
+      throw new Error(errors.join(" "));
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const [result] = await db.query(
+      `INSERT INTO users (username, first_name, last_name, phone_number, ip_address, role, company_id, password, enable_google2fa, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        username,
+        first_name,
+        last_name,
+        phone_number,
+        ip_address,
+        role,
+        company_id,
+        hashedPassword,
+        enable_google2fa,
+      ]
+    );
+
+    const [user] = await db.query("SELECT * FROM users WHERE id = ?", [
+      result.insertId,
+    ]);
+
+    return {
+      status: "success",
+      data: user[0],
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(error.message || "Failed to create user");
+  }
+};
+
+exports.update = async (req) => {
+  try {
+    const {
+      id,
+      username,
+      first_name,
+      last_name,
+      phone_number,
+      ip_address,
+      company_id,
+      password,
+      enable_google2fa,
+    } = req.body;
+
+    const errors = [];
+
+    if (!id) errors.push("'id' is required.");
+    if (!username) errors.push("'username' is required.");
+    if (!first_name) errors.push("'first_name' is required.");
+    if (!last_name) errors.push("'last_name' is required.");
+    if (!phone_number) errors.push("'phone_number' is required.");
+    if (!enable_google2fa) errors.push("'enable_google2fa' is required.");
+
+    if (errors.length > 0) {
+      throw new Error(errors.join(" "));
+    }
+
+    const [userResult] = await db.query("SELECT * FROM users WHERE id = ?", [
+      id,
+    ]);
+    if (!userResult.length) {
+      throw new Error("User not found");
+    }
+    const user = userResult[0];
+
+    const updateFields = [
+      "username = ?",
+      "first_name = ?",
+      "last_name = ?",
+      "phone_number = ?",
+      "ip_address = ?",
+      "company_id = ?",
+      "enable_google2fa = ?",
+      "updated_at = NOW()",
+    ];
+    const updateValues = [
+      username,
+      first_name,
+      last_name,
+      phone_number,
+      ip_address,
+      company_id,
+      enable_google2fa,
+    ];
+
+    if (password && password !== undefined && password !== "undefined") {
+      const match = await bcrypt.compare(password, user.password);
+      if (match) {
+        throw new Error("Same password cannot be reused.");
+      }
+      const hashedPassword = await bcrypt.hash(password, 10);
+      updateFields.push("password = ?", "password_updated_at = NOW()");
+      updateValues.push(hashedPassword);
+    }
+
+    updateValues.push(id);
+
+    await db.query(
+      `UPDATE users SET ${updateFields.join(", ")} WHERE id = ?`,
+      updateValues
+    );
+
+    const [updated] = await db.query("SELECT * FROM users WHERE id = ?", [id]);
+
+    return {
+      status: "success",
+      data: updated[0],
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(error.message || "Failed to update user");
+  }
+};
+
+exports.delete = async (req) => {
+  try {
+    const { id } = req.params;
+    if (!id) throw new Error("User ID is required");
+
+    await db.query("DELETE FROM users WHERE id = ?", [id]);
+
+    return {
+      status: "success",
+      message: "User deleted successfully.",
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(error.message || "Failed to delete user");
   }
 };

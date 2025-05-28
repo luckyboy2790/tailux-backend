@@ -17,3 +17,30 @@ exports.getUsersSearch = async (req, res) => {
     res.status(500).json({ error: "Server Error" });
   }
 };
+
+exports.createUser = async (req, res) => {
+  try {
+    const user = await User.create(req);
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
+
+exports.updateUser = async (req, res) => {
+  try {
+    const user = await User.update(req);
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.deleteUser = async (req, res) => {
+  try {
+    const user = await User.delete(req);
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
