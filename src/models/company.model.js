@@ -268,3 +268,75 @@ exports.searchCompanies = async (req) => {
     };
   }
 };
+
+exports.create = async (req) => {
+  try {
+    const { name } = req.body;
+    if (!name || typeof name !== "string") {
+      throw new Error("'name' is required and must be a string.");
+    }
+
+    const [result] = await db.query(
+      `INSERT INTO companies (name, created_at, updated_at)
+       VALUES (?, NOW(), NOW())`,
+      [name]
+    );
+
+    const [company] = await db.query("SELECT * FROM companies WHERE id = ?", [
+      result.insertId,
+    ]);
+
+    return {
+      status: "success",
+      data: company[0],
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(error.message || "Failed to create company");
+  }
+};
+
+exports.update = async (req) => {
+  try {
+    const { id, name } = req.body;
+    if (!id) throw new Error("'id' is required.");
+    if (!name) throw new Error("'name' is required.");
+
+    const [existing] = await db.query("SELECT * FROM companies WHERE id = ?", [id]);
+    if (!existing.length) {
+      throw new Error("Company not found");
+    }
+
+    await db.query(
+      `UPDATE companies SET name = ?, updated_at = NOW() WHERE id = ?`,
+      [name, id]
+    );
+
+    const [updated] = await db.query("SELECT * FROM companies WHERE id = ?", [id]);
+
+    return {
+      status: "success",
+      data: updated[0],
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(error.message || "Failed to update company");
+  }
+};
+
+exports.delete = async (req) => {
+  try {
+    const { id } = req.params;
+    if (!id) throw new Error("'id' is required");
+
+    await db.query("DELETE FROM companies WHERE id = ?", [id]);
+
+    return {
+      status: "success",
+      message: "Company deleted successfully.",
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(error.message || "Failed to delete company");
+  }
+};
