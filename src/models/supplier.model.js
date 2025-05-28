@@ -419,3 +419,132 @@ exports.getPurchases = async (req) => {
     };
   }
 };
+
+exports.create = async (req) => {
+  try {
+    const {
+      name,
+      company,
+      email,
+      phone_number,
+      address,
+      city,
+      note = "",
+    } = req.body;
+
+    if (!name || typeof name !== "string") {
+      throw new Error("The 'name' field is required and must be a string.");
+    }
+
+    if (!company) {
+      throw new Error("The 'company' field is required.");
+    }
+
+    const [result] = await db.query(
+      `INSERT INTO suppliers (name, company, email, phone_number, address, city, note, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        name,
+        company,
+        email || null,
+        phone_number || null,
+        address || null,
+        city || null,
+        note || null,
+      ]
+    );
+
+    const [supplier] = await db.query("SELECT * FROM suppliers WHERE id = ?", [
+      result.insertId,
+    ]);
+
+    return {
+      status: "success",
+      data: supplier[0],
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(error.message || "Failed to create supplier");
+  }
+};
+
+exports.update = async (req) => {
+  try {
+    const { id, name, company, email, phone_number, address, city, note } =
+      req.body;
+
+    if (!id || !name || !company) {
+      throw new Error("The 'id', 'name', and 'company' fields are required.");
+    }
+
+    const [supplier] = await db.query("SELECT * FROM suppliers WHERE id = ?", [
+      id,
+    ]);
+    if (supplier.length === 0) {
+      throw new Error("Supplier not found.");
+    }
+
+    await db.query(
+      `UPDATE suppliers
+       SET name = ?, company = ?, email = ?, phone_number = ?, address = ?, city = ?, note = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [
+        name,
+        company,
+        email || null,
+        phone_number || null,
+        address || null,
+        city || null,
+        note || null,
+        id,
+      ]
+    );
+
+    const [updated] = await db.query("SELECT * FROM suppliers WHERE id = ?", [
+      id,
+    ]);
+
+    return {
+      status: "success",
+      data: updated[0],
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(error.message || "Failed to update supplier");
+  }
+};
+
+exports.delete = async (req) => {
+  try {
+    const { id } = req.params;
+
+    const [supplier] = await db.query("SELECT * FROM suppliers WHERE id = ?", [
+      id,
+    ]);
+    if (supplier.length === 0) {
+      throw new Error("Supplier not found.");
+    }
+
+    const [purchases] = await db.query(
+      "SELECT id FROM purchases WHERE supplier_id = ?",
+      [id]
+    );
+    if (purchases.length > 0) {
+      return {
+        status: "error",
+        message: "Supplier has associated purchases and cannot be deleted.",
+        data: null,
+      };
+    }
+
+    await db.query("DELETE FROM suppliers WHERE id = ?", [id]);
+
+    return {
+      status: "success",
+      data: null,
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(error.message || "Failed to delete supplier");
+  }
+};

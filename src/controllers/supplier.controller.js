@@ -28,3 +28,31 @@ exports.getPurchases = async (req, res) => {
     res.status(500).json({ error: "Server Error" });
   }
 };
+
+exports.createSupplier = async (req, res) => {
+  try {
+    const supplier = await Supplier.create(req);
+    res.json(supplier);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
+
+exports.updateSupplier = async (req, res) => {
+  try {
+    const supplier = await Supplier.update(req);
+    res.json(supplier);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
+
+exports.deleteSupplier = async (req, res) => {
+  try {
+    const supplier = await Supplier.delete(req);
+    res.json(supplier);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
+
