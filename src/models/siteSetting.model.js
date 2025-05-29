@@ -51,18 +51,34 @@ exports.enableSiteStatus = async (req) => {
 exports.disableSiteStatus = async (req) => {
   try {
     const user = req.user;
+
     if (!user || user.role !== "admin") {
       return {
         status: "Error",
         data: null,
-        message: "You are not admin",
+        message: "You are not admin", // Replace with localization if available
       };
     }
 
-    await db.query(
-      "INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = ?",
-      ["site_status", "disabled", "disabled"]
+    // Check if 'site_status' exists
+    const [existing] = await db.query(
+      "SELECT `value` FROM settings WHERE `key` = ? LIMIT 1",
+      ["site_status"]
     );
+
+    if (existing.length > 0) {
+      // Update if exists
+      await db.query("UPDATE settings SET `value` = ? WHERE `key` = ?", [
+        "disabled",
+        "site_status",
+      ]);
+    } else {
+      // Insert if not exists
+      await db.query("INSERT INTO settings (`key`, `value`) VALUES (?, ?)", [
+        "site_status",
+        "disabled",
+      ]);
+    }
 
     return {
       status: "Success",
