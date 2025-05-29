@@ -1,5 +1,5 @@
 const db = require("../config/db");
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 
 exports.enableSiteStatus = async (req) => {
   try {
@@ -9,29 +9,28 @@ exports.enableSiteStatus = async (req) => {
       username,
     ]);
 
-    if (!rows || rows.length === 0) {
-      return {
-        status: "Error",
-        data: null,
-        message: "Invalid credentials",
-      };
-    }
-
     const user = rows[0];
-    const passwordMatch = await bcrypt.compare(password, user.password);
+
+    const passwordMatch =
+      user && (await bcrypt.compare(password, user.password));
 
     if (!passwordMatch) {
-      return {
-        status: "Error",
-        data: null,
-        message: "Invalid credentials",
-      };
+      const err = new Error("Invalid credentials");
+      err.statusCode = 401;
+      throw err;
     }
 
-    await db.query(
-      "INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = ?",
-      ["site_status", "active", "active"]
+    const [updateResult] = await db.query(
+      "UPDATE settings SET value = ? WHERE `key` = ?",
+      ["active", "site_status"]
     );
+
+    if (updateResult.affectedRows === 0) {
+      await db.query("INSERT INTO settings (`key`, `value`) VALUES (?, ?)", [
+        "site_status",
+        "active",
+      ]);
+    }
 
     return {
       status: "Success",
@@ -40,11 +39,7 @@ exports.enableSiteStatus = async (req) => {
     };
   } catch (error) {
     console.error(error);
-    return {
-      status: "Error",
-      data: null,
-      message: "Failed to enable site",
-    };
+    throw error;
   }
 };
 
@@ -172,6 +167,54 @@ exports.getSetting = async (key) => {
       status: "Error",
       data: null,
       message: "Failed to fetch setting",
+    };
+  }
+};
+
+exports.getSiteStatus = async () => {
+  try {
+    const [rows] = await db.query(
+      "SELECT value FROM settings WHERE `key` = ? LIMIT 1",
+      ["site_status"]
+    );
+
+    const status = rows.length > 0 ? rows[0].value : null;
+
+    return {
+      status: "Success",
+      data: status,
+      message: "Site status retrieved",
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "Error",
+      data: null,
+      message: "Failed to retrieve site status",
+    };
+  }
+};
+
+exports.getDisableTime = async () => {
+  try {
+    const [rows] = await db.query(
+      "SELECT value FROM settings WHERE `key` = ? LIMIT 1",
+      ["site_disable_time"]
+    );
+
+    const disableTime = rows.length > 0 ? rows[0].value : null;
+
+    return {
+      status: "Success",
+      data: disableTime,
+      message: "Site disable time retrieved",
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "Error",
+      data: null,
+      message: "Failed to retrieve disable time",
     };
   }
 };

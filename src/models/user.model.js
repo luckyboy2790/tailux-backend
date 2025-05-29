@@ -253,6 +253,7 @@ exports.update = async (req) => {
       phone_number,
       ip_address,
       company_id,
+      role,
       password,
       enable_google2fa,
     } = req.body;
@@ -285,6 +286,7 @@ exports.update = async (req) => {
       "phone_number = ?",
       "ip_address = ?",
       "company_id = ?",
+      "role = ?",
       "enable_google2fa = ?",
       "updated_at = NOW()",
     ];
@@ -295,6 +297,7 @@ exports.update = async (req) => {
       phone_number,
       ip_address,
       company_id,
+      role,
       enable_google2fa,
     ];
 

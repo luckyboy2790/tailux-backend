@@ -24,7 +24,7 @@ exports.enableSiteStatus = async (req, res) => {
     const siteSetting = await SiteSetting.enableSiteStatus(req);
     res.json(siteSetting);
   } catch (err) {
-    res.status(500).json({ error: "Server Error" });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 };
 
@@ -37,3 +37,20 @@ exports.disableSiteStatus = async (req, res) => {
   }
 };
 
+exports.getSiteStatus = async (req, res) => {
+  try {
+    const siteSetting = await SiteSetting.getSiteStatus();
+    res.json(siteSetting);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
+
+exports.getDisableTime = async (req, res) => {
+  try {
+    const siteSetting = await SiteSetting.getDisableTime();
+    res.json(siteSetting);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
