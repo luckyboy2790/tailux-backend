@@ -9,3 +9,12 @@ exports.getSiteSetting = async (req, res) => {
     res.status(500).json({ error: "Server Error" });
   }
 };
+
+exports.setSiteStatus = async (req, res) => {
+  try {
+    const siteSetting = await SiteSetting.setSetting(req);
+    res.json(siteSetting);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
