@@ -725,3 +725,106 @@ exports.approve = async (req) => {
     };
   }
 };
+
+exports.concurrentPaymentCreate = async (req) => {
+  try {
+    const { date, reference_no, note = "", purchases = "[]" } = req.body;
+
+    if (!date || !reference_no || !purchases) {
+      throw new Error(
+        "Missing required fields: date, reference_no, or purchases"
+      );
+    }
+
+    const parsedPurchases = JSON.parse(purchases);
+    if (!Array.isArray(parsedPurchases) || parsedPurchases.length === 0) {
+      throw new Error("No valid purchases found");
+    }
+
+    const timestamp = moment(date).format("YYYY-MM-DD HH:mm:ss");
+    const userRole = req.user?.role || "user";
+
+    const paymentIds = [];
+
+    for (const purchase of parsedPurchases) {
+      const paymentable_id = purchase.id;
+      const amount = purchase.amount;
+      const type = "purchase"; // Assuming fixed type for now
+
+      const paymentableType =
+        type === "purchase" ? "App\\Models\\Purchase" : "App\\Models\\Sale";
+
+      const [existing] = await db.query(
+        `SELECT id FROM payments WHERE reference_no = ? AND paymentable_id = ? AND paymentable_type = ?`,
+        [reference_no, paymentable_id, paymentableType]
+      );
+
+      if (existing.length > 0) {
+        continue; // skip if already exists
+      }
+
+      const paymentableQuery = `SELECT s.company, c.name as company_name FROM purchases p
+         LEFT JOIN suppliers s ON p.supplier_id = s.id
+         LEFT JOIN companies c ON p.company_id = c.id
+         WHERE p.id = ?`;
+
+      const [rows] = await db.query(paymentableQuery, [paymentable_id]);
+
+      if (rows.length === 0) {
+        continue; // skip invalid purchases
+      }
+
+      const paymentableCompany = slugify(rows[0].company || "", {
+        lower: true,
+      });
+      const companyName = rows[0].company_name || "UnknownCompany";
+
+      const [paymentResult] = await db.query(
+        `INSERT INTO payments (timestamp, reference_no, amount, paymentable_id, paymentable_type, note, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [
+          timestamp,
+          reference_no,
+          amount,
+          paymentable_id,
+          paymentableType,
+          note,
+          0,
+        ]
+      );
+
+      const paymentId = paymentResult.insertId;
+      paymentIds.push(paymentId);
+
+      if (req.files && req.files.attachment) {
+        const attachments = Array.isArray(req.files.attachment)
+          ? req.files.attachment
+          : [req.files.attachment];
+
+        for (let i = 0; i < attachments.length; i++) {
+          const file = attachments[i];
+          const ext = path.extname(file.name);
+
+          const attachName = `payments/${companyName}_${reference_no}_${paymentable_id}_${paymentableCompany}_${v4()}${ext}`;
+
+          const { key } = await putObject(file.data, attachName);
+
+          await db.query(
+            `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at)
+             VALUES (?, ?, ?, NOW(), NOW())`,
+            [`/${key}`, paymentId, "App\\Models\\Payment"]
+          );
+        }
+      }
+    }
+
+    return {
+      status: "success",
+      created_count: paymentIds.length,
+      payment_ids: paymentIds,
+    };
+  } catch (error) {
+    console.error(error);
+    throw error;
+  }
+};

@@ -13,5 +13,10 @@ router.post("/update", verifyToken, paymentController.updatePayment);
 router.post("/delete/:id", verifyToken, paymentController.deletePayment);
 router.get("/search", verifyToken, paymentController.searchPayments);
 router.post("/approve/:id", verifyToken, paymentController.approvePayment);
+router.post(
+  "/concurrent/create",
+  verifyToken,
+  paymentController.concurrentPaymentCreate
+);
 
 module.exports = router;
