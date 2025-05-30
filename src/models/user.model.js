@@ -180,6 +180,7 @@ exports.create = async (req) => {
       last_name,
       phone_number,
       ip_address,
+      email,
       role,
       company_id,
       password,
@@ -214,14 +215,15 @@ exports.create = async (req) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const [result] = await db.query(
-      `INSERT INTO users (username, first_name, last_name, phone_number, ip_address, role, company_id, password, enable_google2fa, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      `INSERT INTO users (username, first_name, last_name, phone_number, ip_address, email, role, company_id, password, enable_google2fa, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         username,
         first_name,
         last_name,
         phone_number,
         ip_address,
+        email,
         role,
         company_id,
         hashedPassword,
@@ -252,6 +254,7 @@ exports.update = async (req) => {
       last_name,
       phone_number,
       ip_address,
+      email,
       company_id,
       role,
       password,
@@ -285,6 +288,7 @@ exports.update = async (req) => {
       "last_name = ?",
       "phone_number = ?",
       "ip_address = ?",
+      "email = ?",
       "company_id = ?",
       "role = ?",
       "enable_google2fa = ?",
@@ -296,6 +300,7 @@ exports.update = async (req) => {
       last_name,
       phone_number,
       ip_address,
+      email,
       company_id,
       role,
       enable_google2fa,
@@ -308,7 +313,7 @@ exports.update = async (req) => {
       }
       const hashedPassword = await bcrypt.hash(password, 10);
       updateFields.push("password = ?", "password_updated_at = NOW()");
-      updateValues.push(hashedPassword);
+      updateValues.push(hashedPassword, id);
     }
 
     updateValues.push(id);
