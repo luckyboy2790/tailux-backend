@@ -742,7 +742,6 @@ exports.concurrentPaymentCreate = async (req) => {
     }
 
     const timestamp = moment(date).format("YYYY-MM-DD HH:mm:ss");
-    const userRole = req.user?.role || "user";
 
     const paymentIds = [];
 
