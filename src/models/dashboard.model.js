@@ -2,25 +2,32 @@ const db = require("../config/db");
 const moment = require("moment");
 // const { getUserFromAuth } = require("../utils/auth");
 
-exports.getDashboardData = async (req, res) => {
+async function getAmountAfterReturnsAndPayments(purchaseId) {
+  const [[{ returned = 0 }]] = await db.query(
+    `SELECT SUM(amount) as returned FROM preturns WHERE status = 1 AND purchase_id = ?`,
+    [purchaseId]
+  );
+  const [[{ paid = 0 }]] = await db.query(
+    `SELECT SUM(amount) as paid FROM payments WHERE status = 1 AND paymentable_id = ? AND paymentable_type = 'App\\Models\\Purchase'`,
+    [purchaseId]
+  );
+  return { returned: Number(returned) || 0, paid: Number(paid) || 0 };
+}
+
+exports.getDashboardData = async (req) => {
   try {
-    // const authUser = await getUserFromAuth(req);
+    const authUser = req.user;
 
     let companyId = null;
-    const [defaultCompany] = await db.query("SELECT id FROM companies LIMIT 1");
-    if (!defaultCompany || defaultCompany.length === 0) {
-      return { error: "No company found." };
+    const [[defaultCompany]] = await db.query(
+      "SELECT id FROM companies ORDER BY id ASC LIMIT 1"
+    );
+    if (!defaultCompany) return { error: "No company found." };
+
+    companyId = defaultCompany.id;
+    if (["user", "secretary"].includes(authUser?.role)) {
+      companyId = authUser.company_id;
     }
-    companyId = defaultCompany[0].id;
-
-    // if (authUser.role === "user" || authUser.role === "secretary") {
-    //   const [[{ id: userCompanyId } = {}]] = await db.query(
-    //     "SELECT id FROM companies WHERE id = ?",
-    //     [authUser.company_id]
-    //   );
-    //   if (userCompanyId) companyId = userCompanyId;
-    // }
-
     if (req.query.company_id) {
       companyId = Number(req.query.company_id);
     }
@@ -39,7 +46,7 @@ exports.getDashboardData = async (req, res) => {
 
     let dt = moment(startDate);
     while (dt.isSameOrBefore(endDate, "day")) {
-      const key = dt.format("YYYY-MM-DD") + " 00:00:00";
+      const key = dt.format("YYYY-MM-DD");
       keyArray.push(dt.format("MMM/DD"));
 
       const [[{ total_purchase = 0 }]] = await db.query(
@@ -53,14 +60,13 @@ exports.getDashboardData = async (req, res) => {
       );
 
       const [[{ total_payment = 0 }]] = await db.query(
-        `SELECT SUM(amount) as total_payment FROM payments
-         WHERE DATE(timestamp) = ? AND paymentable_type = 'App\\Models\\Purchase'`,
+        `SELECT SUM(amount) as total_payment FROM payments WHERE status = 1 AND DATE(timestamp) = ? AND paymentable_type = 'App\\\\Models\\\\Purchase'`,
         [key]
       );
 
-      purchaseArray.push(Number(total_purchase) || 0);
-      saleArray.push(Number(total_sale) || 0);
-      paymentArray.push(Number(total_payment) || 0);
+      purchaseArray.push(Number(total_purchase));
+      saleArray.push(Number(total_sale));
+      paymentArray.push(Number(total_payment));
 
       dt.add(1, "day");
     }
@@ -74,21 +80,20 @@ exports.getDashboardData = async (req, res) => {
     const monthPurchases = await getMonthData("purchases", where);
 
     const after5Day = moment().add(5, "days").format("YYYY-MM-DD");
-
     const [results] = await db.query(
-      `SELECT p.id, p.grand_total, COALESCE(SUM(py.amount), 0) as paid_amount
-      FROM purchases p
-      LEFT JOIN payments py ON py.paymentable_id = p.id
-        AND py.paymentable_type = 'App\\Models\\Purchase'
-      WHERE p.company_id = ?
-        AND p.credit_days IS NOT NULL
-        AND p.expiry_date BETWEEN CURDATE() AND ?
-      GROUP BY p.id, p.grand_total
-      HAVING p.grand_total > paid_amount`,
+      `SELECT id, grand_total FROM purchases
+       WHERE company_id = ? AND credit_days IS NOT NULL AND expiry_date BETWEEN CURDATE() AND ?`,
       [companyId, after5Day]
     );
 
-    const expiredIn5DaysCount = results.length;
+    let expiredIn5DaysCount = 0;
+    for (const purchase of results) {
+      const { returned, paid } = await getAmountAfterReturnsAndPayments(
+        purchase.id
+      );
+      const totalAmount = purchase.grand_total - returned;
+      if (totalAmount > paid) expiredIn5DaysCount++;
+    }
 
     const dashboardData = {
       today_purchases: todayPurchases,
@@ -114,7 +119,7 @@ exports.getDashboardData = async (req, res) => {
 
 exports.getExtraDashboardData = async (req, res) => {
   try {
-    // const authUser = await getUserFromAuth(req);
+    const authUser = req.user;
     let companyId = null;
 
     // Fetch the first company (default company)
@@ -124,9 +129,9 @@ exports.getExtraDashboardData = async (req, res) => {
     }
     companyId = defaultCompany[0].id;
 
-    // if (authUser.role === "user" || authUser.role === "secretary") {
-    //   companyId = authUser.company_id;
-    // }
+    if (authUser.role === "user" || authUser.role === "secretary") {
+      companyId = authUser.company_id;
+    }
 
     if (req.query.company_id) {
       companyId = Number(req.query.company_id);
@@ -163,11 +168,16 @@ exports.getExtraDashboardData = async (req, res) => {
       `SELECT
         p.id,
         p.grand_total,
-        IFNULL(SUM(pay.amount), 0) AS paid_amount
+        COALESCE(SUM(py.amount), 0) AS paid_amount,
+        COALESCE(SUM(r.amount), 0) AS returned_amount
       FROM purchases p
-      LEFT JOIN payments pay
-        ON pay.paymentable_id = p.id
-        AND pay.paymentable_type = 'App\\\\Models\\\\Purchase'
+      LEFT JOIN payments py
+        ON py.paymentable_id = p.id
+      AND py.paymentable_type = 'App\\\\Models\\\\Purchase'
+      AND py.status = 1
+      LEFT JOIN preturns r
+        ON r.purchase_id = p.id
+      AND r.status = 1
       WHERE p.company_id = ?
         AND p.credit_days IS NOT NULL
         AND p.expiry_date <= CURDATE()
@@ -175,9 +185,10 @@ exports.getExtraDashboardData = async (req, res) => {
       [companyId]
     );
 
-    const expiredPurchasesCount = expiredPurchases.filter(
-      (purchase) => purchase.grand_total > purchase.paid_amount
-    ).length;
+    const expiredPurchasesCount = expiredPurchases.filter((p) => {
+      const totalAmount = p.grand_total - p.returned_amount;
+      return totalAmount > p.paid_amount;
+    }).length;
 
     const data = {
       company_balance: companyBalance,
@@ -198,27 +209,21 @@ exports.getCompanies = async (req, res) => {
 
 async function getTodayData(table, where = "") {
   const [rows] = await db.query(
-    `SELECT id FROM ${table} WHERE TO_DAYS(timestamp) = TO_DAYS(NOW()) ${where}`
+    `SELECT id FROM ${table} WHERE status = 1 AND TO_DAYS(timestamp) = TO_DAYS(NOW()) ${where}`
   );
   const orderables = rows.map((row) => row.id);
   const count = orderables.length;
   let total = 0;
 
   if (count > 0) {
-    // Only run the query if there are orderable IDs
-    if (table === "purchases") {
-      const [totalResult] = await db.query(
-        `SELECT SUM(subtotal) as total FROM orders WHERE orderable_id IN (?) AND orderable_type = 'Purchase'`,
-        [orderables]
-      );
-      total = totalResult[0]?.total || 0;
-    } else if (table === "sales") {
-      const [totalResult] = await db.query(
-        `SELECT SUM(subtotal) as total FROM orders WHERE orderable_id IN (?) AND orderable_type = 'Sale'`,
-        [orderables]
-      );
-      total = totalResult[0]?.total || 0;
-    }
+    const [totalResult] = await db.query(
+      `SELECT SUM(subtotal) as total FROM orders WHERE orderable_id IN (?) AND orderable_type = ?`,
+      [
+        orderables,
+        table === "purchases" ? "App\\Models\\Purchase" : "App\\Models\\Sale",
+      ]
+    );
+    total = totalResult[0]?.total || 0;
   }
 
   return {
@@ -229,27 +234,21 @@ async function getTodayData(table, where = "") {
 
 async function getWeekData(table, where = "") {
   const [rows] = await db.query(
-    `SELECT id FROM ${table} WHERE YEARWEEK(DATE_FORMAT(timestamp, '%Y-%m-%d')) = YEARWEEK(NOW()) ${where}`
+    `SELECT id FROM ${table} WHERE status = 1 AND YEARWEEK(DATE_FORMAT(timestamp, '%Y-%m-%d')) = YEARWEEK(NOW()) ${where}`
   );
-
   const orderables = rows.map((row) => row.id);
   const count = orderables.length;
   let total = 0;
 
   if (count > 0) {
-    if (table === "purchases") {
-      const [totalResult] = await db.query(
-        `SELECT SUM(subtotal) as total FROM orders WHERE orderable_id IN (?) AND orderable_type = 'Purchase'`,
-        [orderables]
-      );
-      total = totalResult[0]?.total || 0;
-    } else if (table === "sales") {
-      const [totalResult] = await db.query(
-        `SELECT SUM(subtotal) as total FROM orders WHERE orderable_id IN (?) AND orderable_type = 'Sale'`,
-        [orderables]
-      );
-      total = totalResult[0]?.total || 0;
-    }
+    const [totalResult] = await db.query(
+      `SELECT SUM(subtotal) as total FROM orders WHERE orderable_id IN (?) AND orderable_type = ?`,
+      [
+        orderables,
+        table === "purchases" ? "App\\Models\\Purchase" : "App\\Models\\Sale",
+      ]
+    );
+    total = totalResult[0]?.total || 0;
   }
 
   return {
@@ -260,27 +259,21 @@ async function getWeekData(table, where = "") {
 
 async function getMonthData(table, where = "") {
   const [rows] = await db.query(
-    `SELECT id FROM ${table} WHERE DATE_FORMAT(timestamp, '%Y%m') = DATE_FORMAT(CURDATE(), '%Y%m') ${where}`
+    `SELECT id FROM ${table} WHERE status = 1 AND DATE_FORMAT(timestamp, '%Y%m') = DATE_FORMAT(CURDATE(), '%Y%m') ${where}`
   );
   const orderables = rows.map((row) => row.id);
   const count = orderables.length;
   let total = 0;
 
   if (count > 0) {
-    // Only run the query if there are orderable IDs
-    if (table === "purchases") {
-      const [totalResult] = await db.query(
-        `SELECT SUM(subtotal) as total FROM orders WHERE orderable_id IN (?) AND orderable_type = 'Purchase'`,
-        [orderables]
-      );
-      total = totalResult[0]?.total || 0;
-    } else if (table === "sales") {
-      const [totalResult] = await db.query(
-        `SELECT SUM(subtotal) as total FROM orders WHERE orderable_id IN (?) AND orderable_type = 'Sale'`,
-        [orderables]
-      );
-      total = totalResult[0]?.total || 0;
-    }
+    const [totalResult] = await db.query(
+      `SELECT SUM(subtotal) as total FROM orders WHERE orderable_id IN (?) AND orderable_type = ?`,
+      [
+        orderables,
+        table === "purchases" ? "App\\Models\\Purchase" : "App\\Models\\Sale",
+      ]
+    );
+    total = totalResult[0]?.total || 0;
   }
 
   return {

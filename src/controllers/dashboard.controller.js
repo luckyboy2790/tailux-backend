@@ -2,7 +2,7 @@ const Dashboard = require("../models/dashboard.model");
 
 exports.getDashboardData = async (req, res) => {
   try {
-    const dashboardData = await Dashboard.getDashboardData(req, res);
+    const dashboardData = await Dashboard.getDashboardData(req);
     res.json(dashboardData);
   } catch (err) {
     res.status(500).json({ error: "Server Error" });
@@ -11,7 +11,7 @@ exports.getDashboardData = async (req, res) => {
 
 exports.getExtraDashboardData = async (req, res) => {
   try {
-    const data = await Dashboard.getExtraDashboardData(req, res);
+    const data = await Dashboard.getExtraDashboardData(req);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: "Server Error" });
