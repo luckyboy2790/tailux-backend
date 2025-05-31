@@ -1,5 +1,9 @@
 const db = require("../config/db");
 const bcrypt = require("bcrypt");
+const path = require("path");
+const { v4 } = require("uuid");
+const slugify = require("slugify");
+const { putObject } = require("../utils/putObject");
 
 exports.findAll = async () => {
   const [rows] = await db.query("SELECT * FROM users");
@@ -187,8 +191,6 @@ exports.create = async (req) => {
       enable_google2fa,
     } = req.body;
 
-    console.log(req.body);
-
     const errors = [];
 
     if (!username) errors.push("'username' is required.");
@@ -206,6 +208,14 @@ exports.create = async (req) => {
     ]);
     if (exists.length > 0) {
       errors.push("Username already exists.");
+    }
+
+    const [emailExists] = await db.query(
+      "SELECT id FROM users WHERE email = ?",
+      [email]
+    );
+    if (emailExists.length > 0) {
+      errors.push("Email already exists.");
     }
 
     if (errors.length > 0) {
@@ -269,6 +279,14 @@ exports.update = async (req) => {
     if (!last_name) errors.push("'last_name' is required.");
     if (!phone_number) errors.push("'phone_number' is required.");
     if (!enable_google2fa) errors.push("'enable_google2fa' is required.");
+
+    const [emailExists] = await db.query(
+      "SELECT id FROM users WHERE email = ?",
+      [email]
+    );
+    if (emailExists.length > 0) {
+      errors.push("Email already exists.");
+    }
 
     if (errors.length > 0) {
       throw new Error(errors.join(" "));
@@ -349,5 +367,62 @@ exports.delete = async (req) => {
   } catch (error) {
     console.error(error);
     throw new Error(error.message || "Failed to delete user");
+  }
+};
+
+exports.updateProfile = async (req) => {
+  try {
+    const { id } = req.user;
+    const { username, first_name, last_name, email, phone } = req.body;
+
+    const errors = [];
+
+    if (!id) errors.push("'id' is required.");
+    if (!username) errors.push("'username' is required.");
+    if (!first_name) errors.push("'first_name' is required.");
+    if (!last_name) errors.push("'last_name' is required.");
+    if (!email) errors.push("'email' is required.");
+
+    if (errors.length > 0) throw new Error(errors.join(" "));
+
+    const [existing] = await db.query("SELECT * FROM users WHERE id = ?", [id]);
+    if (!existing.length) throw new Error("User not found");
+
+    const updateFields = [
+      "username = ?",
+      "first_name = ?",
+      "last_name = ?",
+      "email = ?",
+      "phone_number = ?",
+      "updated_at = NOW()",
+    ];
+    const updateValues = [username, first_name, last_name, email, phone];
+
+    if (req.files?.avatar) {
+      const avatarFile = req.files.avatar;
+      const filename = `${username}.png`;
+      const { key } = await putObject(avatarFile.data, `users/${filename}`);
+
+      console.log(key);
+    }
+
+    updateValues.push(id);
+    await db.query(
+      `UPDATE users SET ${updateFields.join(", ")} WHERE id = ?`,
+      updateValues
+    );
+
+    const [updated] = await db.query("SELECT * FROM users WHERE id = ?", [id]);
+
+    return {
+      status: "success",
+      data: updated[0],
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "error",
+      message: error.message || "Failed to update profile",
+    };
   }
 };

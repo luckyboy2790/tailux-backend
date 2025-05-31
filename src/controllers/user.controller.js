@@ -44,3 +44,12 @@ exports.deleteUser = async (req, res) => {
     res.status(500).json({ error: "Server Error" });
   }
 };
+
+exports.updateProfile = async (req, res) => {
+  try {
+    const user = await User.updateProfile(req);
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
