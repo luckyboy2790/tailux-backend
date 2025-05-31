@@ -9,5 +9,6 @@ router.post("/create", userController.createUser);
 router.post("/update", userController.updateUser);
 router.post("/delete/:id", userController.deleteUser);
 router.post("/update_profile", verifyToken, userController.updateProfile);
+router.post("/update_password", verifyToken, userController.updatePassword);
 
 module.exports = router;

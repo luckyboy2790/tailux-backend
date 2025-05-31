@@ -426,3 +426,44 @@ exports.updateProfile = async (req) => {
     };
   }
 };
+
+exports.updatePassword = async (req) => {
+  try {
+    const { id } = req.user;
+    const { password } = req.body;
+
+    const errors = [];
+
+    if (!id) errors.push("'id' is required.");
+    if (!password) errors.push("'password' is required.");
+
+    if (errors.length > 0) throw new Error(errors.join(" "));
+
+    const [existing] = await db.query("SELECT * FROM users WHERE id = ?", [id]);
+    if (!existing.length) throw new Error("User not found");
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const updateFields = ["password = ?", "updated_at = NOW()"];
+    const updateValues = [hashedPassword];
+
+    updateValues.push(id);
+    await db.query(
+      `UPDATE users SET ${updateFields.join(", ")} WHERE id = ?`,
+      updateValues
+    );
+
+    const [updated] = await db.query("SELECT * FROM users WHERE id = ?", [id]);
+
+    return {
+      status: "success",
+      data: updated[0],
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "error",
+      message: error.message || "Failed to update password",
+    };
+  }
+};

@@ -53,3 +53,12 @@ exports.updateProfile = async (req, res) => {
     res.status(500).json({ error: "Server Error" });
   }
 };
+
+exports.updatePassword = async (req, res) => {
+  try {
+    const user = await User.updatePassword(req);
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
