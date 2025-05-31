@@ -148,3 +148,35 @@ exports.generate2FACode = async (req) => {
     throw new Error("Failed to generate QR code.");
   }
 };
+
+exports.getQRCode = async (req) => {
+  try {
+    const user = req.user;
+
+    const issuer = process.env.APP_NAME || "pastos";
+    const label = `${issuer}:${user.username}`;
+
+    if (!user.google2fa_secret || !user.enable_google2fa) {
+      throw new Error("User has not enabled 2FA");
+    }
+
+    const otpauth_url = speakeasy.otpauthURL({
+      secret: user.google2fa_secret,
+      label,
+      issuer,
+      encoding: "base32",
+    });
+
+    const qrImage = await qrcode.toDataURL(otpauth_url);
+
+    return {
+      success: true,
+      data: qrImage,
+      otpauth_url,
+      user,
+    };
+  } catch (error) {
+    console.error("getQRCode error:", error.message);
+    throw new Error("Failed to get QR code.");
+  }
+};

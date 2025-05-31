@@ -43,3 +43,14 @@ exports.generate2FACode = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+exports.getQRCode = async (req, res) => {
+  try {
+    const authData = await Auth.getQRCode(req);
+
+    res.status(200).json(authData);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
