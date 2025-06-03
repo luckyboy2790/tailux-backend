@@ -1358,12 +1358,16 @@ exports.getPaymentsReport = async (req) => {
     const auth_user = req.user;
 
     if (auth_user && ["user", "secretary"].includes(auth_user.role)) {
-      filters.push("p.company_id = ?");
-      values.push(auth_user.company_id);
+      filters.push(
+        `((p.paymentable_type = 'App\\\\Models\\\\Sale' AND s.company_id = ?) OR (p.paymentable_type = 'App\\\\Models\\\\Purchase' AND pu.company_id = ?))`
+      );
+      values.push(auth_user.company_id, auth_user.company_id);
     }
     if (company_id) {
-      filters.push("p.company_id = ?");
-      values.push(company_id);
+      filters.push(
+        `((p.paymentable_type = 'App\\\\Models\\\\Sale' AND s.company_id = ?) OR (p.paymentable_type = 'App\\\\Models\\\\Purchase' AND pu.company_id = ?))`
+      );
+      values.push(company_id, company_id);
     }
 
     if (type === "sale") {
@@ -1373,24 +1377,19 @@ exports.getPaymentsReport = async (req) => {
     }
 
     if (supplier_id) {
-      filters.push(
-        `p.paymentable_type = 'App\\\\Models\\\\Purchase' AND p.paymentable_id IN (SELECT id FROM purchases WHERE supplier_id = ? AND status = 1)`
-      );
+      filters.push("pu.supplier_id = ? AND pu.status = 1");
       values.push(supplier_id);
     }
 
     if (customer_id) {
-      filters.push(
-        `p.paymentable_type = 'App\\\\Models\\\\Sale' AND p.paymentable_id IN (SELECT id FROM sales WHERE customer_id = ? AND status = 1)`
-      );
+      filters.push("s.customer_id = ? AND s.status = 1");
       values.push(customer_id);
     }
 
     if (user_id) {
-      filters.push(`(
-        (p.paymentable_type = 'App\\\\Models\\\\Purchase' AND p.paymentable_id IN (SELECT id FROM purchases WHERE user_id = ? AND status = 1)) OR
-        (p.paymentable_type = 'App\\\\Models\\\\Sale' AND p.paymentable_id IN (SELECT id FROM sales WHERE user_id = ? AND status = 1))
-      )`);
+      filters.push(
+        `((p.paymentable_type = 'App\\\\Models\\\\Purchase' AND pu.user_id = ? AND pu.status = 1) OR (p.paymentable_type = 'App\\\\Models\\\\Sale' AND s.user_id = ? AND s.status = 1))`
+      );
       values.push(user_id, user_id);
     }
 
@@ -1413,17 +1412,22 @@ exports.getPaymentsReport = async (req) => {
     const whereClause = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
 
     const [[{ total }]] = await db.query(
-      `SELECT COUNT(*) AS total FROM payments p ${whereClause}`,
+      `SELECT COUNT(*) AS total
+       FROM payments p
+       LEFT JOIN sales s ON p.paymentable_type = 'App\\\\Models\\\\Sale' AND p.paymentable_id = s.id
+       LEFT JOIN purchases pu ON p.paymentable_type = 'App\\\\Models\\\\Purchase' AND p.paymentable_id = pu.id
+       ${whereClause}`,
       values
     );
 
     const [payments] = await db.query(
-      `
-      SELECT p.* FROM payments p
-      ${whereClause}
-      ORDER BY p.timestamp DESC
-      LIMIT ? OFFSET ?
-    `,
+      `SELECT p.*
+       FROM payments p
+       LEFT JOIN sales s ON p.paymentable_type = 'App\\\\Models\\\\Sale' AND p.paymentable_id = s.id
+       LEFT JOIN purchases pu ON p.paymentable_type = 'App\\\\Models\\\\Purchase' AND p.paymentable_id = pu.id
+       ${whereClause}
+       ORDER BY p.timestamp DESC
+       LIMIT ? OFFSET ?`,
       [...values, parseInt(per_page), offset]
     );
 
@@ -1452,33 +1456,29 @@ exports.getPaymentsReport = async (req) => {
     payments.forEach((p) => typeMap.set(p.id, p.paymentable_type));
 
     const purchases = await db.query(
-      `
-      SELECT pu.*, s.id AS supplier_id, s.name AS supplier_name, s.company AS supplier_company
-      FROM purchases pu
-      LEFT JOIN suppliers s ON pu.supplier_id = s.id
-      WHERE pu.id IN (${paymentableIds.map(() => "?").join(",")})`,
+      `SELECT pu.*, s.id AS supplier_id, s.name AS supplier_name, s.company AS supplier_company
+       FROM purchases pu
+       LEFT JOIN suppliers s ON pu.supplier_id = s.id
+       WHERE pu.id IN (${paymentableIds.map(() => "?").join(",")})`,
       paymentableIds
     );
 
     const sales = await db.query(
-      `
-      SELECT sa.*, c.id AS customer_id, c.name AS customer_name, c.company AS customer_company
-      FROM sales sa
-      LEFT JOIN customers c ON sa.customer_id = c.id
-      WHERE sa.id IN (${paymentableIds.map(() => "?").join(",")})`,
+      `SELECT sa.*, c.id AS customer_id, c.name AS customer_name, c.company AS customer_company
+       FROM sales sa
+       LEFT JOIN customers c ON sa.customer_id = c.id
+       WHERE sa.id IN (${paymentableIds.map(() => "?").join(",")})`,
       paymentableIds
     );
 
     const [images] = await db.query(
-      `
-      SELECT *, imageable_id AS payment_id, CONCAT('${req.protocol}://${req.get(
-        "host"
-      )}/storage', path) AS src
-      FROM images
-      WHERE imageable_type = 'App\\\\Models\\\\Payment' AND imageable_id IN (${payments
-        .map(() => "?")
-        .join(",")})
-    `,
+      `SELECT *, imageable_id AS payment_id, CONCAT('${
+        req.protocol
+      }://${req.get("host")}/storage', path) AS src
+       FROM images
+       WHERE imageable_type = 'App\\\\Models\\\\Payment' AND imageable_id IN (${payments
+         .map(() => "?")
+         .join(",")})`,
       payments.map((p) => p.id)
     );
 
@@ -1509,8 +1509,8 @@ exports.getPaymentsReport = async (req) => {
     };
 
     const enriched = payments.map(enrichPayment);
-
     const baseUrl = `${req.protocol}://${req.get("host")}${req.baseUrl}`;
+
     return {
       status: "Success",
       data: {
