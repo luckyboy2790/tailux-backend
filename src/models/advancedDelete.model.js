@@ -14,6 +14,8 @@ exports.sendVerificationCode = async (req) => {
 
     let supplierNames = "All Suppliers";
 
+    console.log(suppliers);
+
     if (Array.isArray(suppliers) && suppliers.length > 0) {
       const [results] = await db.query(
         `SELECT name FROM suppliers WHERE id IN (${suppliers
