@@ -4,14 +4,11 @@ const { Op } = require("sequelize");
 const db = require("../config/db");
 const cache = new Map();
 
-exports.sendVerificationCode = async (req, res) => {
+exports.sendVerificationCode = async (req) => {
   try {
-    const { email } = req.body;
+    const { email, suppliers, startDate, endDate } = req.body;
 
-    if (!email)
-      return res
-        .status(400)
-        .json({ success: false, message: "Email required" });
+    if (!email) return { success: false, message: "Email required" };
 
     const code = crypto.randomBytes(4).toString("hex").toUpperCase();
     cache.set(email, { code, expiresAt: Date.now() + 10 * 60 * 1000 });
@@ -30,7 +27,18 @@ exports.sendVerificationCode = async (req, res) => {
       from: "admin@doradanew.fun",
       to: email,
       subject: "Verification Code",
-      html: `<p>Your verification code is: <b>${code}</b></p>`,
+      html: `
+        <div style="font-family: Arial, sans-serif; color: #ffffff; background-color: #1c1c1c; padding: 20px;">
+          <h2 style="color: white;">Hello, Please verify with code.</h2>
+          <p style="font-size: 24px; font-weight: bold; color: white;">${code}</p>
+    
+          <h3 style="margin-top: 30px; color: white;">Your Requested Data</h3>
+          <p style="color: white;"><strong>Date</strong>&nbsp;&nbsp;&nbsp;&nbsp;${startDate} ~ ${endDate}</p>
+          <p style="color: white;"><strong>Supplier</strong> ${suppliers.join(
+            ", "
+          )}</p>
+        </div>
+      `,
     });
 
     return { success: true };
@@ -64,7 +72,7 @@ exports.submitAdvancedDelete = async (req) => {
       }
     }
 
-    if (suppliers?.length) {
+    if (Array.isArray(suppliers) && suppliers.length > 0) {
       query += ` AND supplier_id IN (${suppliers.map(() => "?").join(",")})`;
       params.push(...suppliers);
     }
