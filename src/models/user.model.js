@@ -4,6 +4,7 @@ const path = require("path");
 const { v4 } = require("uuid");
 const slugify = require("slugify");
 const { putObject } = require("../utils/putObject");
+const { deletObject } = require("../utils/deleteObject");
 
 exports.findAll = async () => {
   const [rows] = await db.query("SELECT * FROM users");
@@ -399,8 +400,9 @@ exports.updateProfile = async (req) => {
     const updateValues = [username, first_name, last_name, email, phone];
 
     if (req.files?.avatar) {
-      const avatarFile = req.files.avatar;
       const filename = `${username}.png`;
+      await deletObject(`users/${filename}`);
+      const avatarFile = req.files.avatar;
       const { key } = await putObject(avatarFile.data, `users/${filename}`);
 
       console.log(key);
