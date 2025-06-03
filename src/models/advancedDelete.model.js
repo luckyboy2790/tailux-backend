@@ -48,38 +48,49 @@ exports.submitAdvancedDelete = async (req) => {
     return { success: false, message: "Invalid or expired code" };
   }
 
-  console.log(cached);
-
   cache.delete(email);
 
   try {
-    let whereClause = {};
+    let query = "SELECT * FROM purchases WHERE 1=1";
+    const params = [];
 
     if (startDate && endDate) {
-      whereClause.timestamp =
-        startDate === endDate
-          ? startDate
-          : { [Op.between]: [startDate, endDate] };
+      if (startDate === endDate) {
+        query += " AND DATE(timestamp) = ?";
+        params.push(startDate);
+      } else {
+        query += " AND DATE(timestamp) BETWEEN ? AND ?";
+        params.push(startDate, endDate);
+      }
     }
 
     if (suppliers?.length) {
-      whereClause.supplier_id = { [Op.in]: suppliers };
+      query += ` AND supplier_id IN (${suppliers.map(() => "?").join(",")})`;
+      params.push(...suppliers);
     }
 
-    const purchases = await db("purchases").where(whereClause);
+    const [purchases] = await db.query(query, params);
 
-    // for (const purchase of purchases) {
-    //   if (purchase.total_amount === purchase.paid_amount) {
-    //     await db("orders").where("purchase_id", purchase.id).del();
-    //     await db("payments")
-    //       .where("paymentable_id", purchase.id)
-    //       .andWhere("paymentable_type", "Purchase")
-    //       .del();
-    //     await db("preturns").where("purchase_id", purchase.id).del();
-    //     await db("purchase_images").where("purchase_id", purchase.id).del();
-    //     await db("purchases").where("id", purchase.id).del();
-    //   }
-    // }
+    for (const purchase of purchases) {
+      if (purchase.total_amount === purchase.paid_amount) {
+        await db.query(
+          "DELETE FROM orders WHERE orderable_id = ? AND orderable_type = 'App\\\\Models\\\\Purchase'",
+          [purchase.id]
+        );
+        await db.query(
+          "DELETE FROM payments WHERE paymentable_id = ? AND paymentable_type = 'App\\\\Models\\\\Purchase'",
+          [purchase.id]
+        );
+        await db.query("DELETE FROM preturns WHERE purchase_id = ?", [
+          purchase.id,
+        ]);
+        await db.query(
+          "DELETE FROM images WHERE imageable_id = ? AND imageable_type = 'App\\\\Models\\\\Purchase'",
+          [purchase.id]
+        );
+        await db.query("DELETE FROM purchases WHERE id = ?", [purchase.id]);
+      }
+    }
 
     return { success: true };
   } catch (err) {
