@@ -14,8 +14,6 @@ exports.sendVerificationCode = async (req) => {
 
     let supplierNames = "All Suppliers";
 
-    console.log(suppliers);
-
     if (Array.isArray(suppliers) && suppliers.length > 0) {
       const [results] = await db.query(
         `SELECT name FROM suppliers WHERE id IN (${suppliers
@@ -46,8 +44,8 @@ exports.sendVerificationCode = async (req) => {
           <p style="font-size: 24px; font-weight: bold; color: white;">${code}</p>
 
           <h3 style="margin-top: 30px; color: white;">Your Requested Data</h3>
-          <p style="color: white;"><strong>Date</strong>&nbsp;&nbsp;&nbsp;&nbsp;${startDate} ~ ${endDate}</p>
-          <p style="color: white;"><strong>Supplier</strong> ${supplierNames}</p>
+          <p style="color: white;"><strong style="margin-right: 15px;">Date</strong>&nbsp;&nbsp;&nbsp;&nbsp;${startDate} ~ ${endDate}</p>
+          <p style="color: white;"><strong style="margin-right: 15px;">Supplier</strong> ${supplierNames}</p>
         </div>
       `,
     });
