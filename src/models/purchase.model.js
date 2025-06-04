@@ -1181,8 +1181,6 @@ exports.allPurchase = async (req) => {
       throw new Error("Unauthorized: User not authenticated");
     }
 
-    console.log(req.query);
-
     // Build query with filters
     let query = `
       SELECT
