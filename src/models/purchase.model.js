@@ -177,14 +177,12 @@ exports.searchPurchases = async (filters, user) => {
     const imageMap = mapById(images);
 
     const enriched = purchaseRows.map((row) => {
-      const totalPaid = (paymentMap[row.id] || []).reduce(
-        (sum, p) => sum + parseFloat(p.amount),
-        0
-      );
-      const totalReturned = (returnMap[row.id] || []).reduce(
-        (sum, r) => sum + parseFloat(r.amount),
-        0
-      );
+      const totalPaid = (paymentMap[row.id] || [])
+        .filter((item) => item.status === 1)
+        .reduce((sum, p) => sum + parseFloat(p.amount), 0);
+      const totalReturned = (returnMap[row.id] || [])
+        .filter((item) => item.status === 1)
+        .reduce((sum, r) => sum + parseFloat(r.amount), 0);
 
       return {
         ...row,
@@ -1394,14 +1392,12 @@ exports.allPurchase = async (req) => {
     const imageMap = mapById(images);
 
     return purchaseRows.map((row) => {
-      const totalPaid = (paymentMap[row.id] || []).reduce(
-        (sum, p) => sum + parseFloat(p.amount),
-        0
-      );
-      const totalReturned = (returnMap[row.id] || []).reduce(
-        (sum, r) => sum + parseFloat(r.amount),
-        0
-      );
+      const totalPaid = (paymentMap[row.id] || [])
+        .filter((item) => item.status === 1)
+        .reduce((sum, p) => sum + parseFloat(p.amount), 0);
+      const totalReturned = (returnMap[row.id] || [])
+        .filter((item) => item.status === 1)
+        .reduce((sum, r) => sum + parseFloat(r.amount), 0);
 
       return {
         ...row,
