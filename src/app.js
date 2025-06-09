@@ -32,6 +32,7 @@ const siteSettingRoutes = require("./routes/siteSetting.route");
 const preturnRoutes = require("./routes/preturn.routes");
 const authRoutes = require("./routes/auth.routes");
 const advancedDeleteRoutes = require("./routes/advancedDelete.routes");
+const categoryRoutes = require("./routes/category.routes");
 
 app.use("/api/users", userRoutes);
 app.use("/api/dashboard", dashboardRoutes);
@@ -50,5 +51,6 @@ app.use("/api/site_setting", siteSettingRoutes);
 app.use("/api/preturn", preturnRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/advanced_delete", advancedDeleteRoutes);
+app.use("/api/category", categoryRoutes);
 
 module.exports = app;
