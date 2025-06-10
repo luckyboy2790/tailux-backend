@@ -565,6 +565,91 @@ exports.update = async (req) => {
   }
 };
 
+exports.delete = async (req) => {
+  const connection = await db.getConnection();
+  try {
+    const { id } = req.params;
+    if (!id) throw new Error("Missing purchase order ID");
+
+    const [userCheck] = await connection.query(
+      `SELECT role FROM users WHERE id = ?`,
+      [req.user?.id]
+    );
+    if (userCheck[0]?.role === "secretary") {
+      return {
+        status: "error",
+        message: "Not allowed",
+        code: 403,
+      };
+    }
+
+    const [checkPurchases] = await connection.query(
+      `SELECT id FROM purchase_orders WHERE purchase_order_id = ? LIMIT 1`,
+      [id]
+    );
+    if (checkPurchases.length > 0) {
+      return {
+        status: "error",
+        message:
+          "Purchase order cannot be deleted because it has related purchases.",
+        code: 400,
+      };
+    }
+
+    await connection.beginTransaction();
+
+    const [poImages] = await connection.query(
+      `SELECT path FROM images WHERE imageable_type = 'App\\Models\\PurchaseOrder' AND imageable_id = ?`,
+      [id]
+    );
+    for (const img of poImages) {
+      if (await fileExists(img.path)) {
+        await deleteFile(img.path);
+      }
+    }
+    await connection.query(
+      `DELETE FROM images WHERE imageable_type = 'App\\Models\\PurchaseOrder' AND imageable_id = ?`,
+      [id]
+    );
+
+    const [itemImages] = await connection.query(
+      `SELECT imageable_id, path FROM images WHERE imageable_type = 'App\\Models\\PurchaseOrderItem' AND imageable_id IN (SELECT id FROM pre_order_items WHERE pre_order_id = ?)`,
+      [id]
+    );
+    for (const img of itemImages) {
+      if (await fileExists(img.path)) {
+        await deleteFile(img.path);
+      }
+    }
+    await connection.query(
+      `DELETE FROM images WHERE imageable_type = 'App\\Models\\PurchaseOrderItem' AND imageable_id IN (SELECT id FROM pre_order_items WHERE pre_order_id = ?)`,
+      [id]
+    );
+
+    await connection.query(
+      `DELETE FROM pre_order_items WHERE pre_order_id = ?`,
+      [id]
+    );
+    await connection.query(`DELETE FROM pre_orders WHERE id = ?`, [id]);
+
+    await connection.commit();
+    return {
+      status: "success",
+      message: "Purchase order deleted",
+    };
+  } catch (error) {
+    await connection.rollback();
+    console.error("Delete PreOrder Error:", error.message);
+    return {
+      status: "error",
+      message: error.message,
+      code: 500,
+    };
+  } finally {
+    connection.release();
+  }
+};
+
 exports.getPurchaseOrderDetail = async (req) => {
   try {
     const purchaseOrderId = req.params.id || req.query.id;

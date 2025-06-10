@@ -27,6 +27,14 @@ exports.updatePreOrder = async (req, res) => {
   }
 };
 
+exports.deletePreOrder = async (req, res) => {
+  try {
+    const preOrder = await PreOrder.delete(req);
+    res.json(preOrder);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
 
 exports.getPreOrderDetail = async (req, res) => {
   try {
