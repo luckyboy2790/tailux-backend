@@ -9,6 +9,15 @@ exports.getPreOrderSearch = async (req, res) => {
   }
 };
 
+exports.createPreOrder = async (req, res) => {
+  try {
+    const preOrder = await PreOrder.create(req);
+    res.json(preOrder);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
+
 exports.getRecievedOrderSearch = async (req, res) => {
   try {
     const receivedOrders = await PreOrder.searchReceivedOrders(req.query);

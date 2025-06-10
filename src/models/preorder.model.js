@@ -1,4 +1,9 @@
 const db = require("../config/db");
+const path = require("path");
+const moment = require("moment");
+const slugify = require("slugify");
+const { v4 } = require("uuid");
+const { putObject } = require("../utils/putObject");
 
 exports.searchPurchaseOrders = async (req) => {
   try {
@@ -68,7 +73,6 @@ exports.searchPurchaseOrders = async (req) => {
     const page = parseInt(req.query.page) || 1;
     const offset = (page - 1) * perPage;
 
-    // Count total purchase orders
     const countQuery = `
       SELECT COUNT(*) AS total
       FROM pre_orders po
@@ -77,7 +81,6 @@ exports.searchPurchaseOrders = async (req) => {
     const [countResult] = await db.query(countQuery, values);
     const total = countResult[0]?.total || 0;
 
-    // Get paginated purchase orders with supplier and company details
     const orderQuery = `
       SELECT po.*, s.name AS supplier_name, s.email AS supplier_email, s.company AS supplier_company, c.name AS company_name
       FROM pre_orders po
@@ -90,18 +93,65 @@ exports.searchPurchaseOrders = async (req) => {
     const orderValues = [...values, perPage, offset];
     const [purchaseOrderRows] = await db.query(orderQuery, orderValues);
 
+    const baseUrl =
+      req.query.base_url || "http://your-domain.com/api/purchase_order/search";
+
     const purchaseOrderIds = purchaseOrderRows.map((po) => po.id);
 
-    // Get purchase orders for each pre_order_id (pre_order_items) with categories
-    const orderItemsQuery = `
+    if (!purchaseOrderIds.length) {
+      return {
+        status: "Success",
+        data: {
+          current_page: page,
+          data: [],
+          first_page_url: `${baseUrl}?page=1&per_page=${perPage}`,
+          from: 0,
+          last_page: 0,
+          last_page_url: `${baseUrl}?page=1&per_page=${perPage}`,
+          links: [],
+          next_page_url: null,
+          path: baseUrl,
+          per_page: perPage,
+          prev_page_url: null,
+          to: 0,
+          total: 0,
+        },
+        message: null,
+      };
+    }
+
+    const [orderItems] = await db.query(
+      `
       SELECT poi.*, poi.pre_order_id, cat.id AS category_id, cat.name AS category_name
       FROM pre_order_items poi
       LEFT JOIN categories cat ON cat.id = poi.category_id
       WHERE poi.pre_order_id IN (?)
-    `;
-    const [orderItems] = await db.query(orderItemsQuery, [purchaseOrderIds]);
+    `,
+      [purchaseOrderIds]
+    );
 
-    // Group the order items by pre_order_id
+    const preOrderItemIds = orderItems.map((item) => item.id);
+
+    const [orderImages] = await db.query(
+      `SELECT imageable_id, path FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseOrder' AND imageable_id IN (?)`,
+      [purchaseOrderIds]
+    );
+    const orderImagesMap = orderImages.reduce((map, img) => {
+      if (!map[img.imageable_id]) map[img.imageable_id] = [];
+      map[img.imageable_id].push(img.path);
+      return map;
+    }, {});
+
+    const [itemImages] = await db.query(
+      `SELECT imageable_id, path FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseOrderItem' AND imageable_id IN (?)`,
+      [preOrderItemIds]
+    );
+    const itemImagesMap = itemImages.reduce((map, img) => {
+      if (!map[img.imageable_id]) map[img.imageable_id] = [];
+      map[img.imageable_id].push(img.path);
+      return map;
+    }, {});
+
     const orderItemsMap = orderItems.reduce((map, item) => {
       if (!map[item.pre_order_id]) {
         map[item.pre_order_id] = [];
@@ -110,23 +160,24 @@ exports.searchPurchaseOrders = async (req) => {
       return map;
     }, {});
 
-    // Get related purchases for each order (to calculate received_amount)
-    const purchaseQuery = `
+    const [purchaseData] = await db.query(
+      `
       SELECT purchase_order_id, SUM(total_amount) AS received_amount
       FROM purchase_orders
       WHERE purchase_order_id IN (?)
       GROUP BY purchase_order_id
-    `;
-    const [purchaseData] = await db.query(purchaseQuery, [purchaseOrderIds]);
+    `,
+      [purchaseOrderIds]
+    );
 
     const purchaseMap = purchaseData.reduce((map, data) => {
       map[data.purchase_order_id] = data.received_amount;
       return map;
     }, {});
 
-    // Enrich the pre_orders with supplier, company, received_amount, and orders (order items with categories)
     const enrichedPurchaseOrders = purchaseOrderRows.map((po) => ({
       ...po,
+      attachments: orderImagesMap[po.id] || [],
       supplier: {
         id: po.supplier_id,
         name: po.supplier_name,
@@ -145,13 +196,12 @@ exports.searchPurchaseOrders = async (req) => {
           id: item.category_id,
           name: item.category_name,
         },
-      })), // Add category information to each order item
+        images: itemImagesMap[item.id] || [],
+      })),
     }));
 
-    // Pagination links
     const totalPages = Math.ceil(total / perPage);
-    const baseUrl =
-      req.query.base_url || "http://your-domain.com/api/purchase_order/search";
+
     const links = [];
 
     if (page > 1) {
@@ -208,6 +258,172 @@ exports.searchPurchaseOrders = async (req) => {
       status: "Error",
       message: "Failed to fetch purchase orders",
       data: null,
+    };
+  }
+};
+
+exports.create = async (req) => {
+  try {
+    console.log(req.body);
+    const {
+      date,
+      reference_no,
+      supplier,
+      discount,
+      note = "",
+      total_amount,
+      items_json,
+    } = req.body;
+
+    if (!date || !reference_no || !supplier || !discount) {
+      throw new Error("Missing required fields");
+    }
+
+    if (!req.user || !req.user.id) {
+      throw new Error("Unauthorized");
+    }
+
+    const decodedItems = JSON.parse(items_json || "[]");
+    if (!Array.isArray(decodedItems) || decodedItems.length === 0) {
+      throw new Error("Please provide at least one item");
+    }
+
+    const [existing] = await db.query(
+      `SELECT id FROM pre_orders WHERE reference_no = ? AND supplier_id = ?`,
+      [reference_no, supplier]
+    );
+    if (existing.length > 0) {
+      throw new Error("Reference number already taken");
+    }
+
+    const timestamp = moment(date).format("YYYY-MM-DD HH:mm:ss");
+    const user_id = req.user.id;
+    const company_id = req.user.company_id;
+
+    const [preOrderInsert] = await db.query(
+      `INSERT INTO pre_orders (user_id, timestamp, reference_no, company_id, supplier_id, discount_string, note, grand_total, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        user_id,
+        timestamp,
+        reference_no,
+        company_id,
+        supplier,
+        discount,
+        note,
+        total_amount,
+      ]
+    );
+
+    const pre_order_id = preOrderInsert.insertId;
+
+    if (req.files && req.files.attachment) {
+      const attachments = Array.isArray(req.files.attachment)
+        ? req.files.attachment
+        : [req.files.attachment];
+
+      const [supplierData] = await db.query(
+        `SELECT company FROM suppliers WHERE id = ?`,
+        [supplier]
+      );
+      const supplier_slug = slugify(supplierData[0]?.company || "", {
+        lower: true,
+      });
+
+      for (const file of attachments) {
+        const ext = path.extname(file.name);
+        const filename = `pre_orders/${company_id}_${reference_no}_${supplier_slug}_${v4()}${ext}`;
+
+        const { key } = await putObject(file.data, filename);
+
+        await db.query(
+          `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at)
+           VALUES (?, ?, ?, NOW(), NOW())`,
+          [`/${key}`, pre_order_id, "App\\Models\\PurchaseOrder"]
+        );
+      }
+    }
+
+    const imageMap = {};
+    for (const field in req.files) {
+      const match = field.match(/^images\[(\d+)\]/);
+
+      console.log(match);
+
+      if (match) {
+        const index = match[1];
+        imageMap[index] = Array.isArray(req.files[field])
+          ? req.files[field]
+          : [req.files[field]];
+      }
+    }
+
+    for (let i = 0; i < decodedItems.length; i++) {
+      const item = decodedItems[i];
+      const { product_name, product_cost, quantity, discount, category } = item;
+
+      console.log(item);
+
+      const _cost = Number(product_cost) || 0;
+      const _qty = Number(quantity) || 0;
+
+      let discountValue = 0;
+      if (typeof discount === "string" && discount.trim().endsWith("%")) {
+        const percent = Number(discount.trim().replace("%", ""));
+        if (!isNaN(percent)) discountValue = (_cost * percent) / 100;
+      } else {
+        const flat = Number(discount);
+        if (!isNaN(flat)) discountValue = flat;
+      }
+
+      const subTotal = (_cost - discountValue) * _qty;
+
+      const [itemInsert] = await db.query(
+        `INSERT INTO pre_order_items (pre_order_id, product, cost, quantity, discount, discount_string, category_id, subtotal, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [
+          pre_order_id,
+          product_name,
+          _cost,
+          _qty,
+          discountValue,
+          discount,
+          category,
+          subTotal,
+        ]
+      );
+
+      const pre_order_item_id = itemInsert.insertId;
+      const images = imageMap[i] || [];
+
+      for (const img of images) {
+        const ext = path.extname(img.name);
+        const filename = `pre_order_items/${company_id}_${reference_no}_${v4()}${ext}`;
+        const { key } = await putObject(img.data, filename);
+
+        await db.query(
+          `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at)
+           VALUES (?, ?, ?, NOW(), NOW())`,
+          [`/${key}`, pre_order_item_id, "App\\Models\\PurchaseOrderItem"]
+        );
+      }
+    }
+
+    return {
+      status: "success",
+      pre_order_id,
+    };
+  } catch (error) {
+    console.error("PreOrder Error:", error.message);
+    return {
+      status: "error",
+      message: error.message,
+      code:
+        error.message.includes("Missing") ||
+        error.message.includes("Unauthorized") ||
+        error.message.includes("Reference")
+          ? 422
+          : 500,
     };
   }
 };
