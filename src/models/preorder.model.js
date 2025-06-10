@@ -10,6 +10,11 @@ exports.searchPurchaseOrders = async (req) => {
     const values = [];
     const filterConditions = [];
 
+    if (req.user && req.user?.role !== "admin") {
+      filterConditions.push("po.company_id = ?");
+      values.push(req.user.company_id);
+    }
+
     if (req.query.company_id) {
       filterConditions.push("po.company_id = ?");
       values.push(req.query.company_id);
@@ -424,6 +429,248 @@ exports.create = async (req) => {
         error.message.includes("Reference")
           ? 422
           : 500,
+    };
+  }
+};
+
+exports.update = async (req) => {
+  try {
+    console.log(req.body);
+    const {
+      id,
+      date,
+      reference_no,
+      supplier,
+      discount,
+      note = "",
+      total_amount,
+      items_json,
+    } = req.body;
+
+    if (!id || !date || !reference_no || !supplier || !discount) {
+      throw new Error("Missing required fields");
+    }
+
+    if (!req.user || !req.user.id) {
+      throw new Error("Unauthorized");
+    }
+
+    const decodedItems = JSON.parse(items_json || "[]");
+    if (!Array.isArray(decodedItems) || decodedItems.length === 0) {
+      throw new Error("Please provide at least one item");
+    }
+
+    const [existing] = await db.query(
+      `SELECT id FROM pre_orders WHERE reference_no = ? AND supplier_id = ? AND id != ?`,
+      [reference_no, supplier, id]
+    );
+    if (existing.length > 0) {
+      throw new Error("Reference number already taken");
+    }
+
+    const timestamp = moment(date).format("YYYY-MM-DD HH:mm:ss");
+    const company_id = req.user.company_id;
+
+    await db.query(
+      `UPDATE pre_orders SET timestamp = ?, reference_no = ?, supplier_id = ?, discount_string = ?, note = ?, grand_total = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [timestamp, reference_no, supplier, discount, note, total_amount, id]
+    );
+
+    // delete old items
+    await db.query(`DELETE FROM pre_order_items WHERE pre_order_id = ?`, [id]);
+
+    // delete old images of old items
+    await db.query(
+      `DELETE FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseOrderItem' AND imageable_id NOT IN (SELECT id FROM pre_order_items WHERE pre_order_id = ?)`,
+      [id]
+    );
+
+    const imageMap = {};
+    for (const field in req.files) {
+      const match = field.match(/^images\[(\d+)\]/);
+      if (match) {
+        const index = match[1];
+        imageMap[index] = Array.isArray(req.files[field])
+          ? req.files[field]
+          : [req.files[field]];
+      }
+    }
+
+    for (let i = 0; i < decodedItems.length; i++) {
+      const item = decodedItems[i];
+      const { product_name, product_cost, quantity, discount, category } = item;
+
+      const _cost = Number(product_cost) || 0;
+      const _qty = Number(quantity) || 0;
+
+      let discountValue = 0;
+      if (typeof discount === "string" && discount.trim().endsWith("%")) {
+        const percent = Number(discount.trim().replace("%", ""));
+        if (!isNaN(percent)) discountValue = (_cost * percent) / 100;
+      } else {
+        const flat = Number(discount);
+        if (!isNaN(flat)) discountValue = flat;
+      }
+
+      const subTotal = (_cost - discountValue) * _qty;
+
+      const [itemInsert] = await db.query(
+        `INSERT INTO pre_order_items (pre_order_id, product, cost, quantity, discount, discount_string, category_id, subtotal, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [
+          id,
+          product_name,
+          _cost,
+          _qty,
+          discountValue,
+          discount,
+          category,
+          subTotal,
+        ]
+      );
+
+      const pre_order_item_id = itemInsert.insertId;
+      const images = imageMap[i] || [];
+
+      for (const img of images) {
+        const ext = path.extname(img.name);
+        const filename = `pre_order_items/${company_id}_${reference_no}_${v4()}${ext}`;
+        const { key } = await putObject(img.data, filename);
+
+        await db.query(
+          `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at)
+           VALUES (?, ?, ?, NOW(), NOW())`,
+          [`/${key}`, pre_order_item_id, "App\\Models\\PurchaseOrderItem"]
+        );
+      }
+    }
+
+    return {
+      status: "success",
+      pre_order_id: id,
+    };
+  } catch (error) {
+    console.error("Update PreOrder Error:", error.message);
+    return {
+      status: "error",
+      message: error.message,
+      code:
+        error.message.includes("Missing") ||
+        error.message.includes("Unauthorized") ||
+        error.message.includes("Reference")
+          ? 422
+          : 500,
+    };
+  }
+};
+
+exports.getPurchaseOrderDetail = async (req) => {
+  try {
+    const purchaseOrderId = req.params.id || req.query.id;
+    if (!purchaseOrderId) {
+      return {
+        status: "Error",
+        message: "Missing purchase order ID",
+        data: null,
+      };
+    }
+
+    const [orderRows] = await db.query(
+      `
+      SELECT po.*, s.name AS supplier_name, s.email AS supplier_email, s.company AS supplier_company, c.name AS company_name
+      FROM pre_orders po
+      LEFT JOIN suppliers s ON s.id = po.supplier_id
+      LEFT JOIN companies c ON c.id = po.company_id
+      WHERE po.id = ?
+    `,
+      [purchaseOrderId]
+    );
+
+    const po = orderRows[0];
+    if (!po) {
+      return {
+        status: "Error",
+        message: "Purchase order not found",
+        data: null,
+      };
+    }
+
+    const [items] = await db.query(
+      `
+      SELECT poi.*, poi.pre_order_id, cat.id AS category_id, cat.name AS category_name
+      FROM pre_order_items poi
+      LEFT JOIN categories cat ON cat.id = poi.category_id
+      WHERE poi.pre_order_id = ?
+    `,
+      [purchaseOrderId]
+    );
+
+    const itemIds = items.map((i) => i.id);
+
+    const [poImages] = await db.query(
+      `SELECT path FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseOrder' AND imageable_id = ?`,
+      [purchaseOrderId]
+    );
+
+    const [itemImages] = itemIds.length
+      ? await db.query(
+          `SELECT imageable_id, path FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseOrderItem' AND imageable_id IN (?)`,
+          [itemIds]
+        )
+      : [[]];
+
+    const itemImageMap = itemImages.reduce((map, img) => {
+      if (!map[img.imageable_id]) map[img.imageable_id] = [];
+      map[img.imageable_id].push(img.path);
+      return map;
+    }, {});
+
+    const [received] = await db.query(
+      `
+      SELECT SUM(total_amount) AS received_amount
+      FROM purchase_orders
+      WHERE purchase_order_id = ?
+    `,
+      [purchaseOrderId]
+    );
+
+    const enrichedOrder = {
+      ...po,
+      attachments: poImages.map((img) => img.path),
+      supplier: {
+        id: po.supplier_id,
+        name: po.supplier_name,
+        email: po.supplier_email,
+        company_id: po.company_id,
+        company_name: po.supplier_company,
+        company: {
+          id: po.company_id,
+          name: po.company_name,
+        },
+      },
+      received_amount: received[0]?.received_amount || "0",
+      orders: items.map((item) => ({
+        ...item,
+        category: {
+          id: item.category_id,
+          name: item.category_name,
+        },
+        images: itemImageMap[item.id] || [],
+      })),
+    };
+
+    return {
+      status: "Success",
+      message: null,
+      data: enrichedOrder,
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "Error",
+      message: "Failed to fetch purchase order details",
+      data: null,
     };
   }
 };

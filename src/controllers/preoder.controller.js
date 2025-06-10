@@ -18,6 +18,25 @@ exports.createPreOrder = async (req, res) => {
   }
 };
 
+exports.updatePreOrder = async (req, res) => {
+  try {
+    const preOrder = await PreOrder.update(req);
+    res.json(preOrder);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
+
+
+exports.getPreOrderDetail = async (req, res) => {
+  try {
+    const preOrder = await PreOrder.getPurchaseOrderDetail(req);
+    res.json(preOrder);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
+
 exports.getRecievedOrderSearch = async (req, res) => {
   try {
     const receivedOrders = await PreOrder.searchReceivedOrders(req.query);
