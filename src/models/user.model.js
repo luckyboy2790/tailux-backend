@@ -281,14 +281,6 @@ exports.update = async (req) => {
     if (!phone_number) errors.push("'phone_number' is required.");
     if (!enable_google2fa) errors.push("'enable_google2fa' is required.");
 
-    const [emailExists] = await db.query(
-      "SELECT id FROM users WHERE email = ?",
-      [email]
-    );
-    if (emailExists.length > 0) {
-      errors.push("Email already exists.");
-    }
-
     if (errors.length > 0) {
       throw new Error(errors.join(" "));
     }

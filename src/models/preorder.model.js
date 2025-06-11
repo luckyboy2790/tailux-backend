@@ -180,6 +180,23 @@ exports.searchPurchaseOrders = async (req) => {
       return map;
     }, {});
 
+    const [itemReceivedQuantities] = preOrderItemIds.length
+      ? await db.query(
+          `
+          SELECT purchase_order_item_id, SUM(quantity) AS received_quantity
+          FROM purchase_order_items
+          WHERE purchase_order_item_id IN (?)
+          GROUP BY purchase_order_item_id
+        `,
+          [preOrderItemIds]
+        )
+      : [[]];
+
+    const itemReceivedMap = itemReceivedQuantities.reduce((map, row) => {
+      map[row.purchase_order_item_id] = row.received_quantity;
+      return map;
+    }, {});
+
     const enrichedPurchaseOrders = purchaseOrderRows.map((po) => ({
       ...po,
       attachments: orderImagesMap[po.id] || [],
@@ -202,6 +219,7 @@ exports.searchPurchaseOrders = async (req) => {
           name: item.category_name,
         },
         images: itemImagesMap[item.id] || [],
+        received_quantity: itemReceivedMap[item.id] || "0",
       })),
     }));
 
@@ -650,6 +668,163 @@ exports.delete = async (req) => {
   }
 };
 
+exports.receive = async (req) => {
+  const connection = await db.getConnection();
+  try {
+    const { id, reference_no, store, note, shipping_carrier, total_amount } =
+      req.body;
+
+    console.log(shipping_carrier);
+
+    if (!reference_no || !store) {
+      throw new Error("Missing required fields");
+    }
+
+    const [existing] = await connection.query(
+      `SELECT po.supplier_id FROM pre_orders po WHERE po.id = ?`,
+      [id]
+    );
+    if (!existing.length) {
+      throw new Error("Invalid purchase order ID");
+    }
+    const supplier_id = existing[0].supplier_id;
+
+    const [dupRef] = await connection.query(
+      `SELECT id FROM purchase_orders WHERE reference_no = ? AND supplier_id = ? LIMIT 1`,
+      [reference_no, supplier_id]
+    );
+    if (dupRef.length > 0) {
+      return {
+        status: "error",
+        message: "Reference number already taken",
+        code: 422,
+        errors: { reference_no: ["Reference number already taken"] },
+      };
+    }
+
+    await connection.beginTransaction();
+
+    const [preOrder] = await connection.query(
+      `SELECT * FROM pre_orders WHERE id = ? LIMIT 1`,
+      [id]
+    );
+    const po = preOrder[0];
+
+    const store_id = store || po.store_id || null;
+    const [insertPurchase] = await connection.query(
+      `INSERT INTO purchase_orders (purchase_order_id, user_id, store_id, company_id, supplier_id, reference_no, shipping_carrier, purchased_at, total_amount, note, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        id,
+        po.user_id,
+        store_id,
+        po.company_id,
+        po.supplier_id,
+        reference_no,
+        shipping_carrier,
+        po.timestamp,
+        total_amount,
+        note,
+      ]
+    );
+
+    const purchase_id = insertPurchase.insertId;
+    const items = JSON.parse(req.body.items_json || "[]");
+
+    for (const item of items) {
+      const [poi] = await connection.query(
+        `SELECT category_id FROM pre_order_items WHERE id = ? LIMIT 1`,
+        [item.id]
+      );
+      const category_id = poi[0]?.category_id;
+
+      const _cost = Number(item.product_cost) || 0;
+      const _qty = Number(item.receive) || 0;
+
+      let discountValue = 0;
+      if (
+        typeof item.discount === "string" &&
+        item.discount.trim().endsWith("%")
+      ) {
+        const percent = Number(item.discount.trim().replace("%", ""));
+        if (!isNaN(percent)) discountValue = (_cost * percent) / 100;
+      } else {
+        const flat = Number(item.discount);
+        if (!isNaN(flat)) discountValue = flat;
+      }
+
+      const amount = (_cost - discountValue) * _qty;
+
+      console.log(amount);
+
+      const [insertItem] = await connection.query(
+        `INSERT INTO purchase_order_items (purchase_order_item_id, purchase_id, product, cost, quantity, amount, category_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [
+          item.id,
+          purchase_id,
+          item.product_name,
+          item.product_cost,
+          item.receive,
+          amount,
+          category_id,
+        ]
+      );
+
+      const purchase_item_id = insertItem.insertId;
+
+      const [images] = await connection.query(
+        `SELECT path FROM images WHERE imageable_type = 'App\\Models\\PurchaseOrderItem' AND imageable_id = ?`,
+        [item.id]
+      );
+
+      for (const img of images) {
+        await connection.query(
+          `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at)
+           VALUES (?, ?, ?, NOW(), NOW())`,
+          [img.path, purchase_item_id, "App\\Models\\PurchaseItem"]
+        );
+      }
+    }
+
+    if (req.files?.images) {
+      const imageName = `${po.company_id}_${reference_no}_${po.supplier_id}`;
+      const images = Array.isArray(req.files.images)
+        ? req.files.images
+        : [req.files.images];
+
+      for (const file of images) {
+        const ext = path.extname(file.name);
+        const filename = `purchases/${imageName}_${v4()}${ext}`;
+        const { key } = await putObject(file.data, filename);
+
+        await connection.query(
+          `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at)
+           VALUES (?, ?, ?, NOW(), NOW())`,
+          [`/${key}`, purchase_id, "App\\Models\\Purchase"]
+        );
+      }
+    }
+
+    await connection.commit();
+    return {
+      status: "success",
+      message: "Purchase received",
+      data: { purchase_id },
+    };
+  } catch (error) {
+    await connection.rollback();
+    console.error("Receive Error:", error.message);
+    return {
+      status: "error",
+      message: error.message,
+      code: 500,
+    };
+  } finally {
+    connection.release();
+  }
+};
+
 exports.getPurchaseOrderDetail = async (req) => {
   try {
     const purchaseOrderId = req.params.id || req.query.id;
@@ -720,6 +895,23 @@ exports.getPurchaseOrderDetail = async (req) => {
       [purchaseOrderId]
     );
 
+    const [itemReceivedQuantities] = itemIds.length
+      ? await db.query(
+          `
+          SELECT purchase_order_item_id, SUM(quantity) AS received_quantity
+          FROM purchase_order_items
+          WHERE purchase_order_item_id IN (?)
+          GROUP BY purchase_order_item_id
+        `,
+          [itemIds]
+        )
+      : [[]];
+
+    const itemReceivedMap = itemReceivedQuantities.reduce((map, row) => {
+      map[row.purchase_order_item_id] = row.received_quantity;
+      return map;
+    }, {});
+
     const enrichedOrder = {
       ...po,
       attachments: poImages.map((img) => img.path),
@@ -742,6 +934,7 @@ exports.getPurchaseOrderDetail = async (req) => {
           name: item.category_name,
         },
         images: itemImageMap[item.id] || [],
+        received_quantity: itemReceivedMap[item.id] || "0",
       })),
     };
 
@@ -760,259 +953,168 @@ exports.getPurchaseOrderDetail = async (req) => {
   }
 };
 
-exports.searchReceivedOrders = async (filters) => {
+exports.searchReceivedOrders = async (req) => {
   try {
     const values = [];
     const filterConditions = [];
-    // const authUser = filters.auth_user;
 
-    // Base query conditions
-    // if (authUser && authUser.company_id) {
-    //   filterConditions.push("p.company_id = ?");
-    //   values.push(authUser.company_id);
-    // }
-
-    filterConditions.push("p.order_id IS NOT NULL");
-
-    if (filters.order_id) {
-      filterConditions.push("p.order_id = ?");
-      values.push(filters.order_id);
-    }
-
-    if (filters.company_id) {
-      filterConditions.push("p.company_id = ?");
-      values.push(filters.company_id);
-    }
-
-    if (filters.reference_no) {
-      filterConditions.push("p.reference_no LIKE ?");
-      values.push(`%${filters.reference_no}%`);
-    }
-
-    if (filters.supplier_id) {
+    if (req.query.supplier_id) {
       filterConditions.push("p.supplier_id = ?");
-      values.push(filters.supplier_id);
+      values.push(req.query.supplier_id);
     }
 
-    if (filters.startDate && filters.endDate) {
-      if (filters.startDate === filters.endDate) {
-        filterConditions.push("DATE(p.timestamp) = ?");
-        values.push(filters.startDate);
-      } else {
-        filterConditions.push("p.timestamp BETWEEN ? AND ?");
-        values.push(filters.startDate, filters.endDate);
-      }
+    if (req.query.company_id) {
+      filterConditions.push("p.company_id = ?");
+      values.push(req.query.company_id);
     }
 
-    if (filters.keyword) {
-      filterConditions.push(`
-        (
-          p.reference_no LIKE ?
-          OR p.grand_total LIKE ?
-          OR p.company_id IN (SELECT id FROM companies WHERE name LIKE ?)
-          OR p.store_id IN (SELECT id FROM stores WHERE name LIKE ?)
-          OR p.supplier_id IN (SELECT id FROM suppliers WHERE company LIKE ?)
-          OR p.timestamp LIKE ?
-        )
-      `);
-      const keywordLike = `%${filters.keyword}%`;
-      values.push(
-        keywordLike,
-        keywordLike,
-        keywordLike,
-        keywordLike,
-        keywordLike,
-        keywordLike
+    if (req.query.keyword) {
+      const keyword = `%${req.query.keyword}%`;
+      filterConditions.push(
+        `(p.reference_no LIKE ? OR p.total_amount LIKE ? 
+          OR EXISTS (SELECT 1 FROM suppliers s WHERE s.id = p.supplier_id AND (s.company LIKE ? OR s.name LIKE ?)) 
+          OR EXISTS (SELECT 1 FROM pre_orders po WHERE po.id = p.purchase_order_id AND po.reference_no LIKE ?))`
       );
+      values.push(keyword, keyword, keyword, keyword, keyword);
+    }
+
+    if (req.query.startDate && req.query.endDate) {
+      if (req.query.startDate === req.query.endDate) {
+        filterConditions.push("DATE(p.purchased_at) = ?");
+        values.push(req.query.startDate);
+      } else {
+        filterConditions.push("DATE(p.purchased_at) BETWEEN ? AND ?");
+        values.push(req.query.startDate, req.query.endDate);
+      }
     }
 
     const whereClause = filterConditions.length
       ? `WHERE ${filterConditions.join(" AND ")}`
       : "";
 
-    const countQuery = `
-      SELECT COUNT(DISTINCT p.id) AS total
-      FROM purchases p
-      ${whereClause}
-    `;
-
-    const perPage = parseInt(filters.per_page) || 15;
-    const page = parseInt(filters.page) || 1;
+    const perPage = parseInt(req.query.per_page) || 15;
+    const page = parseInt(req.query.page) || 1;
     const offset = (page - 1) * perPage;
 
-    const sortOrder = filters.sort_by_date === "asc" ? "ASC" : "DESC";
-
-    const purchaseQuery = `
-      SELECT
-        p.*,
-        s.id AS supplier_id,
-        s.name AS supplier_name,
-        s.company AS supplier_company,
-        s.email AS supplier_email,
-        s.phone_number AS supplier_phone,
-        s.address AS supplier_address,
-        s.city AS supplier_city,
-        s.note AS supplier_note,
-        c.id AS company_id,
-        c.name AS company_name,
-        st.id AS store_id,
-        st.name AS store_name,
-        u.id AS user_id,
-        u.username AS user_username,
-        u.first_name AS user_first_name,
-        u.last_name AS user_last_name,
-        u.email AS user_email,
-        u.phone_number AS user_phone,
-        u.role AS user_role,
-        u.status AS user_status,
-        u.picture AS user_picture,
-        IFNULL(SUM(pay.amount), 0) AS paid_amount,
-        IFNULL(SUM(pret.amount), 0) AS returned_amount
-      FROM purchases p
-      LEFT JOIN suppliers s ON s.id = p.supplier_id
-      LEFT JOIN companies c ON c.id = p.company_id
-      LEFT JOIN stores st ON st.id = p.store_id
-      LEFT JOIN users u ON u.id = p.user_id
-      LEFT JOIN payments pay
-        ON pay.paymentable_id = p.id
-        AND pay.paymentable_type = 'App\\\\Models\\\\Purchase'
-      LEFT JOIN preturns pret ON pret.purchase_id = p.id
+    const countQuery = `
+      SELECT COUNT(*) AS total
+      FROM purchase_orders p
       ${whereClause}
-      GROUP BY p.id
-      ORDER BY p.timestamp ${sortOrder}
-      LIMIT ? OFFSET ?
     `;
-
-    const purchaseValues = [...values, perPage, offset];
-
     const [countResult] = await db.query(countQuery, values);
     const total = countResult[0]?.total || 0;
 
+    const purchaseQuery = `
+      SELECT p.*, s.name AS supplier_name, s.company AS supplier_company, c.name AS company_name, po.reference_no AS po_reference_no,
+             u.id AS user_id, u.username, u.first_name, u.last_name, u.phone_number, u.role, u.email, u.company_id AS user_company_id,
+             st.id AS store_id, st.name AS store_name, st.company_id AS store_company_id,
+             com_u.name AS user_company_name, com_st.name AS store_company_name
+      FROM purchase_orders p
+      LEFT JOIN suppliers s ON s.id = p.supplier_id
+      LEFT JOIN companies c ON c.id = p.company_id
+      LEFT JOIN pre_orders po ON po.id = p.purchase_order_id
+      LEFT JOIN users u ON u.id = p.user_id
+      LEFT JOIN companies com_u ON com_u.id = u.company_id
+      LEFT JOIN stores st ON st.id = p.store_id
+      LEFT JOIN companies com_st ON com_st.id = st.company_id
+      ${whereClause}
+      ORDER BY p.created_at DESC
+      LIMIT ? OFFSET ?
+    `;
+    const purchaseValues = [...values, perPage, offset];
     const [purchaseRows] = await db.query(purchaseQuery, purchaseValues);
 
-    const enriched = await Promise.all(
-      purchaseRows.map(async (row) => {
-        // Get orders
-        const [orders] = await db.query(
-          `SELECT
-            o.id,
-            o.product_id,
-            o.cost,
-            o.price,
-            o.quantity,
-            o.subtotal,
-            o.expiry_date,
-            o.serial_no,
-            o.orderable_id,
-            o.orderable_type,
-            o.pre_order_item_id,
-            o.created_at,
-            o.updated_at,
-            p.name AS product_name,
-            p.code AS product_code,
-            p.unit AS product_unit,
-            p.cost AS product_cost,
-            p.price AS product_price,
-            p.alert_quantity AS product_alert_quantity
-           FROM orders o
-           LEFT JOIN products p ON p.id = o.product_id
-           WHERE o.orderable_id = ? AND o.orderable_type = 'App\\\\Models\\\\Purchase'`,
-          [row.id]
-        );
+    const purchaseIds = purchaseRows.map((p) => p.id);
 
-        // Get payments
-        const [payments] = await db.query(
-          `SELECT * FROM payments
-           WHERE paymentable_id = ? AND paymentable_type = 'App\\\\Models\\\\Purchase'`,
-          [row.id]
-        );
-
-        // Get preturns
-        const [preturns] = await db.query(
-          `SELECT * FROM preturns WHERE purchase_id = ?`,
-          [row.id]
-        );
-
-        // Get images
-        const [images] = await db.query(
-          `SELECT *,
-                  CONCAT('http://your-domain.com/storage', path) AS src,
-                  'image' AS type
-           FROM images
-           WHERE imageable_id = ? AND imageable_type = 'App\\\\Models\\\\Purchase'`,
-          [row.id]
-        );
-
-        return {
-          ...row,
-          total_amount: row.grand_total,
-          user: {
-            id: row.user_id,
-            username: row.user_username,
-            first_name: row.user_first_name,
-            last_name: row.user_last_name,
-            email: row.user_email,
-            phone_number: row.user_phone,
-            role: row.user_role,
-            status: row.user_status,
-            picture: row.user_picture,
-            name: `${row.user_first_name} ${row.user_last_name}`,
-            company: {
-              id: row.company_id,
-              name: row.company_name,
-            },
-          },
-          orders: orders.map((order) => ({
-            ...order,
-            product: order.product_id
-              ? {
-                  id: order.product_id,
-                  name: order.product_name,
-                  code: order.product_code,
-                  unit: order.product_unit,
-                  cost: order.product_cost,
-                  price: order.product_price,
-                  alert_quantity: order.product_alert_quantity,
-                }
-              : null,
-          })),
-          payments,
-          preturns,
-          images,
-          company: {
-            id: row.company_id,
-            name: row.company_name,
-          },
-          supplier: {
-            id: row.supplier_id,
-            name: row.supplier_name,
-            company: row.supplier_company,
-            email: row.supplier_email,
-            phone_number: row.supplier_phone,
-            address: row.supplier_address,
-            city: row.supplier_city,
-            note: row.supplier_note,
-          },
-          store: {
-            id: row.store_id,
-            name: row.store_name,
-            company: {
-              id: row.company_id,
-              name: row.company_name,
-            },
-          },
-        };
-      })
+    const [items] = await db.query(
+      `SELECT pi.*, cat.id AS category_id, cat.name AS category_name
+       FROM purchase_order_items pi
+       LEFT JOIN categories cat ON cat.id = pi.category_id
+       WHERE pi.purchase_id IN (?)`,
+      [purchaseIds]
     );
+
+    const [itemImages] = await db.query(
+      `SELECT imageable_id, path FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseItem' AND imageable_id IN (?)`,
+      [items.map((i) => i.id)]
+    );
+    const imageMap = itemImages.reduce((acc, img) => {
+      if (!acc[img.imageable_id]) acc[img.imageable_id] = [];
+      acc[img.imageable_id].push(img.path);
+      return acc;
+    }, {});
+
+    const itemsByPurchase = items.reduce((acc, item) => {
+      if (!acc[item.purchase_id]) acc[item.purchase_id] = [];
+      acc[item.purchase_id].push({
+        ...item,
+        category: {
+          id: item.category_id,
+          name: item.category_name,
+        },
+        images: imageMap[item.id] || [],
+      });
+      return acc;
+    }, {});
+
+    const enriched = purchaseRows.map((row) => ({
+      ...row,
+      supplier: {
+        id: row.supplier_id,
+        name: row.supplier_name,
+        company: {
+          id: row.company_id,
+          name: row.supplier_company,
+        },
+      },
+      user: {
+        id: row.user_id,
+        username: row.username,
+        first_name: row.first_name,
+        last_name: row.last_name,
+        phone_number: row.phone_number,
+        email: row.email,
+        role: row.role,
+        name: `${row.first_name} ${row.last_name}`,
+        store_id: row.store_id,
+        company: {
+          id: row.user_company_id,
+          name: row.user_company_name,
+        },
+      },
+      store: {
+        id: row.store_id,
+        name: row.store_name,
+        company: {
+          id: row.store_company_id,
+          name: row.store_company_name,
+        },
+      },
+      items: itemsByPurchase[row.id] || [],
+      images: [],
+    }));
 
     return {
       status: "Success",
       data: {
         current_page: page,
-        per_page: perPage,
-        total,
-        total_pages: Math.ceil(total / perPage),
         data: enriched,
+        first_page_url: `?page=1&per_page=${perPage}`,
+        from: offset + 1,
+        last_page: Math.ceil(total / perPage),
+        last_page_url: `?page=${Math.ceil(
+          total / perPage
+        )}&per_page=${perPage}`,
+        next_page_url:
+          page < Math.ceil(total / perPage)
+            ? `?page=${page + 1}&per_page=${perPage}`
+            : null,
+        path: req.query.base_url || "/api/purchase/search",
+        per_page: perPage,
+        prev_page_url:
+          page > 1 ? `?page=${page - 1}&per_page=${perPage}` : null,
+        to: Math.min(offset + perPage, total),
+        total,
       },
       message: null,
     };
@@ -1020,7 +1122,7 @@ exports.searchReceivedOrders = async (filters) => {
     console.error(error);
     return {
       status: "Error",
-      message: "Failed to fetch received orders",
+      message: "Failed to fetch purchases",
       data: null,
     };
   }

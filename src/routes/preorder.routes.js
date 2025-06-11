@@ -7,6 +7,7 @@ router.get("/search", verifyToken, preOrderController.getPreOrderSearch);
 router.post("/create", verifyToken, preOrderController.createPreOrder);
 router.post("/update", verifyToken, preOrderController.updatePreOrder);
 router.post("/delete/:id", verifyToken, preOrderController.deletePreOrder);
+router.post("/receive", verifyToken, preOrderController.receivePreOrder);
 router.get(
   "/get_detail/:id",
   verifyToken,

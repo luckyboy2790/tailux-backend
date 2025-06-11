@@ -36,6 +36,15 @@ exports.deletePreOrder = async (req, res) => {
   }
 };
 
+exports.receivePreOrder = async (req, res) => {
+  try {
+    const preOrder = await PreOrder.receive(req);
+    res.json(preOrder);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
+
 exports.getPreOrderDetail = async (req, res) => {
   try {
     const preOrder = await PreOrder.getPurchaseOrderDetail(req);
@@ -47,7 +56,7 @@ exports.getPreOrderDetail = async (req, res) => {
 
 exports.getRecievedOrderSearch = async (req, res) => {
   try {
-    const receivedOrders = await PreOrder.searchReceivedOrders(req.query);
+    const receivedOrders = await PreOrder.searchReceivedOrders(req);
 
     res.json(receivedOrders);
   } catch (err) {
