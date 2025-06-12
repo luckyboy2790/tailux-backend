@@ -81,3 +81,13 @@ exports.updateReceivedPurchase = async (req, res) => {
     res.status(500).json({ error: "Server Error" });
   }
 };
+
+exports.deleteReceivedOrder = async (req, res) => {
+  try {
+    const receivedOrder = await PreOrder.deleteReceivedOrder(req);
+    res.json(receivedOrder);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
+

@@ -1026,18 +1026,23 @@ exports.searchReceivedOrders = async (req) => {
 
     const purchaseIds = purchaseRows.map((p) => p.id);
 
-    const [items] = await db.query(
-      `SELECT pi.*, cat.id AS category_id, cat.name AS category_name
-       FROM purchase_order_items pi
-       LEFT JOIN categories cat ON cat.id = pi.category_id
-       WHERE pi.purchase_id IN (?)`,
-      [purchaseIds]
-    );
+    let items = [];
+    let itemImages = [];
+    if (purchaseIds.length > 0) {
+      [items] = await db.query(
+        `SELECT pi.*, cat.id AS category_id, cat.name AS category_name
+         FROM purchase_order_items pi
+         LEFT JOIN categories cat ON cat.id = pi.category_id
+         WHERE pi.purchase_id IN (?)`,
+        [purchaseIds]
+      );
 
-    const [itemImages] = await db.query(
-      `SELECT imageable_id, path FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseItem' AND imageable_id IN (?)`,
-      [items.map((i) => i.id)]
-    );
+      [itemImages] = await db.query(
+        `SELECT imageable_id, path FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseItem' AND imageable_id IN (?)`,
+        [items.map((i) => i.id)]
+      );
+    }
+
     const imageMap = itemImages.reduce((acc, img) => {
       if (!acc[img.imageable_id]) acc[img.imageable_id] = [];
       acc[img.imageable_id].push(img.path);
@@ -1057,10 +1062,13 @@ exports.searchReceivedOrders = async (req) => {
       return acc;
     }, {});
 
-    const [purchaseImages] = await db.query(
-      `SELECT imageable_id, path FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseOrders' AND imageable_id IN (?)`,
-      [purchaseIds]
-    );
+    let purchaseImages = [];
+    if (purchaseIds.length > 0) {
+      [purchaseImages] = await db.query(
+        `SELECT imageable_id, path FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseOrders' AND imageable_id IN (?)`,
+        [purchaseIds]
+      );
+    }
 
     const purchaseImagesMap = purchaseImages.reduce((acc, img) => {
       if (!acc[img.imageable_id]) acc[img.imageable_id] = [];
@@ -1405,6 +1413,101 @@ exports.updateReceivedOrder = async (req) => {
   } catch (error) {
     await connection.rollback();
     console.error("Update Error:", error.message);
+    return {
+      status: "error",
+      message: error.message,
+      code: 500,
+    };
+  } finally {
+    connection.release();
+  }
+};
+
+exports.deleteReceivedOrder = async (req) => {
+  const connection = await db.getConnection();
+  try {
+    const { id } = req.params;
+    if (!id) throw new Error("Missing purchase ID");
+
+    const [userCheck] = await connection.query(
+      `SELECT role FROM users WHERE id = ?`,
+      [req.user?.id]
+    );
+    if (userCheck[0]?.role === "secretary") {
+      return {
+        status: "error",
+        message: "Not allowed",
+        code: 403,
+      };
+    }
+
+    await connection.beginTransaction();
+
+    const [purchaseRow] = await connection.query(
+      `SELECT id FROM purchase_orders WHERE id = ? LIMIT 1`,
+      [id]
+    );
+    if (!purchaseRow.length) {
+      return {
+        status: "error",
+        message: "Purchase not found",
+        code: 404,
+      };
+    }
+
+    const [purchaseImages] = await connection.query(
+      `SELECT id, path FROM images WHERE imageable_type = 'App\\Models\\PurchaseOrders' AND imageable_id = ?`,
+      [id]
+    );
+
+    for (const img of purchaseImages) {
+      if (await fileExists(img.path)) {
+        await deleteFile(img.path);
+      }
+    }
+    await connection.query(
+      `DELETE FROM images WHERE imageable_type = 'App\\Models\\PurchaseOrders' AND imageable_id = ?`,
+      [id]
+    );
+
+    const [purchaseItems] = await connection.query(
+      `SELECT id FROM purchase_order_items WHERE purchase_id = ?`,
+      [id]
+    );
+    const purchaseItemIds = purchaseItems.map((i) => i.id);
+
+    if (purchaseItemIds.length) {
+      const [itemImages] = await connection.query(
+        `SELECT id, path FROM images WHERE imageable_type = 'App\\Models\\PurchaseItem' AND imageable_id IN (?)`,
+        [purchaseItemIds]
+      );
+
+      for (const img of itemImages) {
+        if (await fileExists(img.path)) {
+          await deleteFile(img.path);
+        }
+      }
+
+      await connection.query(
+        `DELETE FROM images WHERE imageable_type = 'App\\Models\\PurchaseItem' AND imageable_id IN (?)`,
+        [purchaseItemIds]
+      );
+    }
+
+    await connection.query(
+      `DELETE FROM purchase_order_items WHERE purchase_id = ?`,
+      [id]
+    );
+    await connection.query(`DELETE FROM purchase_orders WHERE id = ?`, [id]);
+
+    await connection.commit();
+    return {
+      status: "success",
+      message: "Purchase deleted",
+    };
+  } catch (error) {
+    await connection.rollback();
+    console.error("Delete Purchase Error:", error.message);
     return {
       status: "error",
       message: error.message,

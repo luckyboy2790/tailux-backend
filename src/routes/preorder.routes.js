@@ -28,5 +28,10 @@ router.post(
   verifyToken,
   preOrderController.updateReceivedPurchase
 );
+router.post(
+  "/delete_received/:id",
+  verifyToken,
+  preOrderController.deleteReceivedOrder
+);
 
 module.exports = router;
