@@ -674,7 +674,7 @@ exports.receive = async (req) => {
     const { id, reference_no, store, note, shipping_carrier, total_amount } =
       req.body;
 
-    console.log(shipping_carrier);
+    console.log(total_amount);
 
     if (!reference_no || !store) {
       throw new Error("Missing required fields");
@@ -753,9 +753,9 @@ exports.receive = async (req) => {
         if (!isNaN(flat)) discountValue = flat;
       }
 
-      const amount = (_cost - discountValue) * _qty;
+      const amount = (_cost - discountValue).toFixed() * _qty;
 
-      console.log(amount);
+      console.log(amount, _cost, discountValue, _qty);
 
       const [insertItem] = await connection.query(
         `INSERT INTO purchase_order_items (purchase_order_item_id, purchase_id, product, cost, quantity, amount, category_id, created_at, updated_at)
@@ -787,21 +787,21 @@ exports.receive = async (req) => {
       }
     }
 
-    if (req.files?.images) {
+    if (req.files?.attachment) {
       const imageName = `${po.company_id}_${reference_no}_${po.supplier_id}`;
-      const images = Array.isArray(req.files.images)
-        ? req.files.images
-        : [req.files.images];
+      const images = Array.isArray(req.files.attachment)
+        ? req.files.attachment
+        : [req.files.attachment];
 
       for (const file of images) {
         const ext = path.extname(file.name);
-        const filename = `purchases/${imageName}_${v4()}${ext}`;
+        const filename = `purchase_orders/${imageName}_${v4()}${ext}`;
         const { key } = await putObject(file.data, filename);
 
         await connection.query(
           `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at)
            VALUES (?, ?, ?, NOW(), NOW())`,
-          [`/${key}`, purchase_id, "App\\Models\\Purchase"]
+          [`/${key}`, purchase_id, "App\\Models\\PurchaseOrders"]
         );
       }
     }
@@ -1005,7 +1005,7 @@ exports.searchReceivedOrders = async (req) => {
     const total = countResult[0]?.total || 0;
 
     const purchaseQuery = `
-      SELECT p.*, s.name AS supplier_name, s.company AS supplier_company, c.name AS company_name, po.reference_no AS po_reference_no,
+      SELECT p.*, s.name AS supplier_name, s.company AS supplier_company, s.email AS supplier_email, c.name AS company_name, po.reference_no AS po_reference_no,
              u.id AS user_id, u.username, u.first_name, u.last_name, u.phone_number, u.role, u.email, u.company_id AS user_company_id,
              st.id AS store_id, st.name AS store_name, st.company_id AS store_company_id,
              com_u.name AS user_company_name, com_st.name AS store_company_name
@@ -1057,11 +1057,25 @@ exports.searchReceivedOrders = async (req) => {
       return acc;
     }, {});
 
+    const [purchaseImages] = await db.query(
+      `SELECT imageable_id, path FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseOrders' AND imageable_id IN (?)`,
+      [purchaseIds]
+    );
+
+    const purchaseImagesMap = purchaseImages.reduce((acc, img) => {
+      if (!acc[img.imageable_id]) acc[img.imageable_id] = [];
+      acc[img.imageable_id].push(img.path);
+      return acc;
+    }, {});
+
     const enriched = purchaseRows.map((row) => ({
       ...row,
       supplier: {
         id: row.supplier_id,
         name: row.supplier_name,
+        email: row.supplier_email,
+        company_id: row.company_id,
+        company_name: row.supplier_company,
         company: {
           id: row.company_id,
           name: row.supplier_company,
@@ -1091,7 +1105,7 @@ exports.searchReceivedOrders = async (req) => {
         },
       },
       items: itemsByPurchase[row.id] || [],
-      images: [],
+      images: purchaseImagesMap[row.id] || [],
     }));
 
     return {
