@@ -63,3 +63,21 @@ exports.getRecievedOrderSearch = async (req, res) => {
     res.status(500).json({ error: "Server Error" });
   }
 };
+
+exports.getReceivedOrderDetail = async (req, res) => {
+  try {
+    const receivedOrder = await PreOrder.getReceivedOrderDetail(req);
+    res.json(receivedOrder);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};
+
+exports.updateReceivedPurchase = async (req, res) => {
+  try {
+    const receivedOrder = await PreOrder.updateReceivedOrder(req);
+    res.json(receivedOrder);
+  } catch (err) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};

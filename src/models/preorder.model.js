@@ -1141,3 +1141,276 @@ exports.searchReceivedOrders = async (req) => {
     };
   }
 };
+
+exports.getReceivedOrderDetail = async (req) => {
+  try {
+    const id = req.params.id;
+    if (!id) {
+      return {
+        status: "Error",
+        message: "Missing purchase order ID",
+        data: null,
+      };
+    }
+
+    const [rows] = await db.query(
+      `SELECT p.*, s.name AS supplier_name, s.company AS supplier_company, s.email AS supplier_email, c.name AS company_name, po.reference_no AS po_reference_no,
+              u.id AS user_id, u.username, u.first_name, u.last_name, u.phone_number, u.role, u.email, u.company_id AS user_company_id,
+              st.id AS store_id, st.name AS store_name, st.company_id AS store_company_id,
+              com_u.name AS user_company_name, com_st.name AS store_company_name
+       FROM purchase_orders p
+       LEFT JOIN suppliers s ON s.id = p.supplier_id
+       LEFT JOIN companies c ON c.id = p.company_id
+       LEFT JOIN pre_orders po ON po.id = p.purchase_order_id
+       LEFT JOIN users u ON u.id = p.user_id
+       LEFT JOIN companies com_u ON com_u.id = u.company_id
+       LEFT JOIN stores st ON st.id = p.store_id
+       LEFT JOIN companies com_st ON com_st.id = st.company_id
+       WHERE p.id = ?
+       LIMIT 1`,
+      [id]
+    );
+
+    const order = rows[0];
+    if (!order) {
+      return {
+        status: "Error",
+        message: "Purchase order not found",
+        data: null,
+      };
+    }
+
+    const [items] = await db.query(
+      `SELECT pi.*, cat.id AS category_id, cat.name AS category_name
+       FROM purchase_order_items pi
+       LEFT JOIN categories cat ON cat.id = pi.category_id
+       WHERE pi.purchase_id = ?`,
+      [id]
+    );
+
+    const [itemImages] = await db.query(
+      `SELECT imageable_id, path FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseItem' AND imageable_id IN (?)`,
+      [items.map((i) => i.id)]
+    );
+    const imageMap = itemImages.reduce((acc, img) => {
+      if (!acc[img.imageable_id]) acc[img.imageable_id] = [];
+      acc[img.imageable_id].push(img.path);
+      return acc;
+    }, {});
+
+    const enrichedItems = items.map((item) => ({
+      ...item,
+      category: {
+        id: item.category_id,
+        name: item.category_name,
+      },
+      images: imageMap[item.id] || [],
+    }));
+
+    const [purchaseImages] = await db.query(
+      `SELECT imageable_id, path FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseOrders' AND imageable_id = ?`,
+      [id]
+    );
+
+    const enriched = {
+      ...order,
+      supplier: {
+        id: order.supplier_id,
+        name: order.supplier_name,
+        email: order.supplier_email,
+        company_id: order.company_id,
+        company_name: order.supplier_company,
+        company: {
+          id: order.company_id,
+          name: order.supplier_company,
+        },
+      },
+      user: {
+        id: order.user_id,
+        username: order.username,
+        first_name: order.first_name,
+        last_name: order.last_name,
+        phone_number: order.phone_number,
+        email: order.email,
+        role: order.role,
+        name: `${order.first_name} ${order.last_name}`,
+        store_id: order.store_id,
+        company: {
+          id: order.user_company_id,
+          name: order.user_company_name,
+        },
+      },
+      store: {
+        id: order.store_id,
+        name: order.store_name,
+        company: {
+          id: order.store_company_id,
+          name: order.store_company_name,
+        },
+      },
+      items: enrichedItems,
+      images: purchaseImages.map((img) => img.path),
+    };
+
+    return {
+      status: "Success",
+      data: enriched,
+      message: null,
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "Error",
+      message: "Failed to fetch purchase order detail",
+      data: null,
+    };
+  }
+};
+
+exports.updateReceivedOrder = async (req) => {
+  const connection = await db.getConnection();
+  try {
+    const { id, reference_no, store, note, shipping_carrier, total_amount } =
+      req.body;
+
+    if (!reference_no || !store) {
+      throw new Error("Missing required fields");
+    }
+
+    const [existing] = await connection.query(
+      `SELECT purchase_order_id, supplier_id FROM purchase_orders WHERE id = ? LIMIT 1`,
+      [id]
+    );
+    if (!existing.length) {
+      throw new Error("Invalid purchase order ID");
+    }
+
+    const { purchase_order_id, supplier_id } = existing[0];
+
+    const [dupRef] = await connection.query(
+      `SELECT id FROM purchase_orders WHERE reference_no = ? AND supplier_id = ? AND id != ? LIMIT 1`,
+      [reference_no, supplier_id, id]
+    );
+    if (dupRef.length > 0) {
+      return {
+        status: "error",
+        message: "Reference number already taken",
+        code: 422,
+        errors: { reference_no: ["Reference number already taken"] },
+      };
+    }
+
+    await connection.beginTransaction();
+
+    await connection.query(
+      `UPDATE purchase_orders SET store_id = ?, reference_no = ?, shipping_carrier = ?, total_amount = ?, note = ?, updated_at = NOW() WHERE id = ?`,
+      [store, reference_no, shipping_carrier, total_amount, note, id]
+    );
+
+    await connection.query(
+      `DELETE FROM purchase_order_items WHERE purchase_id = ?`,
+      [id]
+    );
+    await connection.query(
+      `DELETE FROM images WHERE imageable_type = 'App\\Models\\PurchaseItem' AND imageable_id IN (SELECT id FROM purchase_order_items WHERE purchase_id = ?)`,
+      [id]
+    );
+
+    const items = JSON.parse(req.body.items_json || "[]");
+
+    for (const item of items) {
+      const [poi] = await connection.query(
+        `SELECT category_id FROM pre_order_items WHERE id = ? LIMIT 1`,
+        [item.id]
+      );
+      const category_id = poi[0]?.category_id;
+
+      const _cost = Number(item.product_cost) || 0;
+      const _qty = Number(item.receive) || 0;
+
+      let discountValue = 0;
+      if (
+        typeof item.discount === "string" &&
+        item.discount.trim().endsWith("%")
+      ) {
+        const percent = Number(item.discount.trim().replace("%", ""));
+        if (!isNaN(percent)) discountValue = (_cost * percent) / 100;
+      } else {
+        const flat = Number(item.discount);
+        if (!isNaN(flat)) discountValue = flat;
+      }
+
+      const amount = (_cost - discountValue).toFixed() * _qty;
+
+      const [insertItem] = await connection.query(
+        `INSERT INTO purchase_order_items (purchase_order_item_id, purchase_id, product, cost, quantity, amount, category_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [
+          item.id,
+          id,
+          item.product_name,
+          item.product_cost,
+          item.receive,
+          amount,
+          category_id,
+        ]
+      );
+
+      const purchase_item_id = insertItem.insertId;
+
+      const [images] = await connection.query(
+        `SELECT path FROM images WHERE imageable_type = 'App\\Models\\PurchaseOrderItem' AND imageable_id = ?`,
+        [item.id]
+      );
+
+      for (const img of images) {
+        await connection.query(
+          `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at)
+           VALUES (?, ?, ?, NOW(), NOW())`,
+          [img.path, purchase_item_id, "App\\Models\\PurchaseItem"]
+        );
+      }
+    }
+
+    if (req.files?.attachment) {
+      await connection.query(
+        `DELETE FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseOrders' AND imageable_id = ?`,
+        [id]
+      );
+
+      const imageName = `${supplier_id}_${reference_no}_${id}`;
+      const images = Array.isArray(req.files.attachment)
+        ? req.files.attachment
+        : [req.files.attachment];
+
+      for (const file of images) {
+        const ext = path.extname(file.name);
+        const filename = `purchase_orders/${imageName}_${v4()}${ext}`;
+        const { key } = await putObject(file.data, filename);
+
+        await connection.query(
+          `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at)
+           VALUES (?, ?, ?, NOW(), NOW())`,
+          [`/${key}`, id, "App\\Models\\PurchaseOrders"]
+        );
+      }
+    }
+
+    await connection.commit();
+    return {
+      status: "success",
+      message: "Purchase order updated",
+      data: { purchase_id: id },
+    };
+  } catch (error) {
+    await connection.rollback();
+    console.error("Update Error:", error.message);
+    return {
+      status: "error",
+      message: error.message,
+      code: 500,
+    };
+  } finally {
+    connection.release();
+  }
+};

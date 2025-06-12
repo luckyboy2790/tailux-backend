@@ -13,6 +13,20 @@ router.get(
   verifyToken,
   preOrderController.getPreOrderDetail
 );
-router.get("/serach_recieved", preOrderController.getRecievedOrderSearch);
+router.get(
+  "/serach_recieved",
+  verifyToken,
+  preOrderController.getRecievedOrderSearch
+);
+router.get(
+  "/get_received_detail/:id",
+  verifyToken,
+  preOrderController.getReceivedOrderDetail
+);
+router.post(
+  "/update_received",
+  verifyToken,
+  preOrderController.updateReceivedPurchase
+);
 
 module.exports = router;
