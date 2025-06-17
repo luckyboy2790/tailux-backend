@@ -414,33 +414,6 @@ exports.delete = async (req) => {
 
     await db.query(`DELETE FROM sales WHERE id = ?`, [id]);
 
-    if (sale.status === 0 && userRole === "admin") {
-      await db.query(
-        `INSERT INTO notifications (
-          user_id,
-          company_id,
-          reference_no,
-          supplier,
-          amount,
-          message,
-          notifiable_id,
-          notifiable_type,
-          created_at,
-          updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-        [
-          userId,
-          sale.company_id,
-          sale.reference_no,
-          "",
-          sale.grand_total,
-          "sale_rejected",
-          sale.id,
-          "App\\\\Models\\\\Sale",
-        ]
-      );
-    }
-
     return { status: "success" };
   } catch (error) {
     console.error(error);

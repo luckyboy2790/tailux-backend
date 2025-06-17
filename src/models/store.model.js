@@ -196,8 +196,6 @@ exports.getStores = async (req) => {
   }
 };
 
-// controllers/storeController.js
-
 exports.create = async (req) => {
   try {
     const { name, company } = req.body;

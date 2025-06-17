@@ -33,6 +33,7 @@ const preturnRoutes = require("./routes/preturn.routes");
 const authRoutes = require("./routes/auth.routes");
 const advancedDeleteRoutes = require("./routes/advancedDelete.routes");
 const categoryRoutes = require("./routes/category.routes");
+const notificationRoutes = require("./routes/notification.routes");
 
 app.use("/api/users", userRoutes);
 app.use("/api/dashboard", dashboardRoutes);
@@ -52,5 +53,6 @@ app.use("/api/preturn", preturnRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/advanced_delete", advancedDeleteRoutes);
 app.use("/api/category", categoryRoutes);
+app.use("/api/notification", notificationRoutes);
 
 module.exports = app;
