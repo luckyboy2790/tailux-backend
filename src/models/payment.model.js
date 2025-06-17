@@ -7,7 +7,6 @@ const path = require("path");
 
 exports.searchPending = async (req) => {
   try {
-    // Ensure authenticated user
     if (!req.user || !req.user.id) {
       throw new Error("Unauthorized: User not authenticated");
     }
@@ -42,17 +41,14 @@ exports.searchPending = async (req) => {
     const params = [];
     const countParams = [];
 
-    // Apply company filter based on user role
     let userCompanyId = "";
     if (req.user.role === "user" || req.user.role === "secretary") {
       userCompanyId = req.user.company_id;
     }
 
-    // Use company_id from query params if provided, otherwise use user's company_id
     const effectiveCompanyId = company_id || userCompanyId;
 
     if (effectiveCompanyId) {
-      // Get purchases and sales for the company to filter payments
       const [companyPurchases] = await db.query(
         `SELECT id FROM purchases WHERE company_id = ?`,
         [effectiveCompanyId]
@@ -66,7 +62,6 @@ exports.searchPending = async (req) => {
       const purchaseIds = companyPurchases.map((p) => p.id);
       const saleIds = companySales.map((s) => s.id);
 
-      // No purchases or sales found for company
       if (purchaseIds.length === 0 && saleIds.length === 0) {
         return {
           status: "Success",
@@ -89,7 +84,6 @@ exports.searchPending = async (req) => {
         };
       }
 
-      // Get payment IDs for purchases and sales of this company
       let purchasePaymentIds = [];
       let salePaymentIds = [];
 
@@ -124,7 +118,6 @@ exports.searchPending = async (req) => {
         params.push(...companyPaymentIds);
         countParams.push(...companyPaymentIds);
       } else {
-        // No payments found for this company
         return {
           status: "Success",
           data: {
@@ -297,7 +290,6 @@ exports.searchPending = async (req) => {
   } catch (error) {
     console.error(error);
 
-    // Return structured error response
     if (error.message.includes("Unauthorized")) {
       return {
         status: "Error",
@@ -600,7 +592,6 @@ exports.search = async (req) => {
       throw new Error("Invalid type: must be either 'purchase' or 'sale'");
     }
 
-    // 1. Fetch all payments
     const [payments] = await db.query(
       `SELECT * FROM payments WHERE paymentable_id = ? AND paymentable_type = ?`,
       [paymentable_id, paymentableType]
@@ -613,13 +604,11 @@ exports.search = async (req) => {
     const paymentIds = payments.map((p) => p.id);
     const placeholders = paymentIds.map(() => "?").join(", ");
 
-    // 2. Get images for each payment
     const [images] = await db.query(
       `SELECT * FROM images WHERE imageable_type = 'App\\\\Models\\\\Payment' AND imageable_id IN (${placeholders})`,
       paymentIds
     );
 
-    // 3. Merge images into payments
     const paymentsWithImages = payments.map((payment) => {
       const relatedImages = images.filter(
         (img) => img.imageable_id === payment.id
@@ -748,7 +737,7 @@ exports.concurrentPaymentCreate = async (req) => {
     for (const purchase of parsedPurchases) {
       const paymentable_id = purchase.id;
       const amount = purchase.amount;
-      const type = "purchase"; // Assuming fixed type for now
+      const type = "purchase";
 
       const paymentableType =
         type === "purchase" ? "App\\Models\\Purchase" : "App\\Models\\Sale";
@@ -759,7 +748,7 @@ exports.concurrentPaymentCreate = async (req) => {
       );
 
       if (existing.length > 0) {
-        continue; // skip if already exists
+        continue;
       }
 
       const paymentableQuery = `SELECT s.company, c.name as company_name FROM purchases p
@@ -770,7 +759,7 @@ exports.concurrentPaymentCreate = async (req) => {
       const [rows] = await db.query(paymentableQuery, [paymentable_id]);
 
       if (rows.length === 0) {
-        continue; // skip invalid purchases
+        continue;
       }
 
       const paymentableCompany = slugify(rows[0].company || "", {
