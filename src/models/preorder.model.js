@@ -287,7 +287,6 @@ exports.searchPurchaseOrders = async (req) => {
 
 exports.create = async (req) => {
   try {
-    console.log(req.body);
     const {
       date,
       reference_no,

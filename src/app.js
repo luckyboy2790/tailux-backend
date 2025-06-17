@@ -4,13 +4,18 @@ const fileUpload = require("express-fileupload");
 const app = express();
 
 const corsOptions = {
-  origin: ["http://localhost:5173", "https://your-production-domain.com"],
+  origin: [
+    "http://localhost:5173",
+    "https://your-production-domain.com",
+  ],
   methods: ["GET", "POST", "PUT", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
 };
 
 app.use(cors(corsOptions));
+
+app.use(express.json());
 
 app.use((req, res, next) => {
   console.log(`\x1b[42m ${req.method} ${req.url} request received.\x1b[0m`);
