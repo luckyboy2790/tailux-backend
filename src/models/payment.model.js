@@ -220,12 +220,8 @@ exports.searchPending = async (req) => {
       });
     }
 
-    console.log(paymentableData);
-
     const data = payments.map((payment) => {
       const paymentWithRelations = { ...payment };
-
-      console.log(paymentWithRelations);
 
       paymentWithRelations.images = images.filter(
         (img) => img.imageable_id === payment.id

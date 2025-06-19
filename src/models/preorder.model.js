@@ -370,8 +370,6 @@ exports.create = async (req) => {
     for (const field in req.files) {
       const match = field.match(/^images\[(\d+)\]/);
 
-      console.log(match);
-
       if (match) {
         const index = match[1];
         imageMap[index] = Array.isArray(req.files[field])
@@ -383,8 +381,6 @@ exports.create = async (req) => {
     for (let i = 0; i < decodedItems.length; i++) {
       const item = decodedItems[i];
       const { product_name, product_cost, quantity, discount, category } = item;
-
-      console.log(item);
 
       const _cost = Number(product_cost) || 0;
       const _qty = Number(quantity) || 0;
@@ -452,9 +448,9 @@ exports.create = async (req) => {
 
 exports.update = async (req) => {
   try {
-    console.log(req.body);
     const {
       id,
+      imageEditable,
       date,
       reference_no,
       supplier,
@@ -494,14 +490,41 @@ exports.update = async (req) => {
       [timestamp, reference_no, supplier, discount, note, total_amount, id]
     );
 
-    // delete old items
     await db.query(`DELETE FROM pre_order_items WHERE pre_order_id = ?`, [id]);
 
-    // delete old images of old items
-    await db.query(
-      `DELETE FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseOrderItem' AND imageable_id NOT IN (SELECT id FROM pre_order_items WHERE pre_order_id = ?)`,
-      [id]
-    );
+    if (imageEditable === "true") {
+      if (req.files && req.files.attachment) {
+        const attachments = Array.isArray(req.files.attachment)
+          ? req.files.attachment
+          : [req.files.attachment];
+
+        const [supplierData] = await db.query(
+          `SELECT company FROM suppliers WHERE id = ?`,
+          [supplier]
+        );
+        const supplier_slug = slugify(supplierData[0]?.company || "", {
+          lower: true,
+        });
+
+        for (const file of attachments) {
+          const ext = path.extname(file.name);
+          const filename = `pre_orders/${company_id}_${reference_no}_${supplier_slug}_${v4()}${ext}`;
+
+          const { key } = await putObject(file.data, filename);
+
+          await db.query(
+            `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at)
+           VALUES (?, ?, ?, NOW(), NOW())`,
+            [`/${key}`, pre_order_id, "App\\Models\\PurchaseOrder"]
+          );
+        }
+      } else {
+        await db.query(
+          `DELETE FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseOrder' AND imageable_id = ?`,
+          [id]
+        );
+      }
+    }
 
     const imageMap = {};
     for (const field in req.files) {
@@ -516,7 +539,15 @@ exports.update = async (req) => {
 
     for (let i = 0; i < decodedItems.length; i++) {
       const item = decodedItems[i];
-      const { product_name, product_cost, quantity, discount, category } = item;
+      const {
+        product_name,
+        product_cost,
+        quantity,
+        discount,
+        category,
+        imageEditable,
+        original_id,
+      } = item;
 
       const _cost = Number(product_cost) || 0;
       const _qty = Number(quantity) || 0;
@@ -550,15 +581,27 @@ exports.update = async (req) => {
       const pre_order_item_id = itemInsert.insertId;
       const images = imageMap[i] || [];
 
-      for (const img of images) {
-        const ext = path.extname(img.name);
-        const filename = `pre_order_items/${company_id}_${reference_no}_${v4()}${ext}`;
-        const { key } = await putObject(img.data, filename);
-
+      if (imageEditable === true || imageEditable === "true") {
         await db.query(
-          `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at)
-           VALUES (?, ?, ?, NOW(), NOW())`,
-          [`/${key}`, pre_order_item_id, "App\\Models\\PurchaseOrderItem"]
+          `DELETE FROM images WHERE imageable_type = 'App\\Models\\PurchaseOrderItem' AND imageable_id = ?`,
+          [original_id]
+        );
+
+        for (const img of images) {
+          const ext = path.extname(img.name);
+          const filename = `pre_order_items/${company_id}_${reference_no}_${v4()}${ext}`;
+          const { key } = await putObject(img.data, filename);
+
+          await db.query(
+            `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at)
+             VALUES (?, ?, ?, NOW(), NOW())`,
+            [`/${key}`, pre_order_item_id, "App\\Models\\PurchaseOrderItem"]
+          );
+        }
+      } else {
+        await db.query(
+          `UPDATE images SET imageable_id = ? WHERE imageable_id = ?`,
+          [pre_order_item_id, original_id]
         );
       }
     }
@@ -673,8 +716,6 @@ exports.receive = async (req) => {
     const { id, reference_no, store, note, shipping_carrier, total_amount } =
       req.body;
 
-    console.log(total_amount);
-
     if (!reference_no || !store) {
       throw new Error("Missing required fields");
     }
@@ -753,8 +794,6 @@ exports.receive = async (req) => {
       }
 
       const amount = (_cost - discountValue).toFixed() * _qty;
-
-      console.log(amount, _cost, discountValue, _qty);
 
       const [insertItem] = await connection.query(
         `INSERT INTO purchase_order_items (purchase_order_item_id, purchase_id, product, cost, quantity, amount, category_id, created_at, updated_at)
