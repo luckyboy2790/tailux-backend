@@ -220,8 +220,12 @@ exports.searchPending = async (req) => {
       });
     }
 
+    console.log(paymentableData);
+
     const data = payments.map((payment) => {
       const paymentWithRelations = { ...payment };
+
+      console.log(paymentWithRelations);
 
       paymentWithRelations.images = images.filter(
         (img) => img.imageable_id === payment.id
@@ -235,7 +239,8 @@ exports.searchPending = async (req) => {
       } else if (payment.paymentable_type === "App\\Models\\Sale") {
         paymentWithRelations.paymentable =
           paymentableData[`sale_${payment.paymentable_id}`] || null;
-        paymentWithRelations.supplier = null;
+        paymentWithRelations.supplier =
+          paymentWithRelations.paymentable?.customer || null;
       } else {
         paymentWithRelations.paymentable = null;
         paymentWithRelations.supplier = null;
