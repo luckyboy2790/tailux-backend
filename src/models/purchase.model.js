@@ -896,7 +896,7 @@ exports.update = async (req) => {
       ]
     );
 
-    if (imageEditable) {
+    if (imageEditable === "true") {
       if (req.files && req.files.attachment) {
         await db.query(
           `DELETE FROM images WHERE imageable_id = ? AND imageable_type = ?`,

@@ -569,6 +569,7 @@ exports.update = async (req) => {
   try {
     const {
       id,
+      imageEditable,
       date,
       reference_no,
       customer,
@@ -627,40 +628,49 @@ exports.update = async (req) => {
       [timestamp, reference_no, company_id, customer, note, grand_total, id]
     );
 
-    if (req.files && req.files.attachment) {
-      await db.query(
-        `DELETE FROM images WHERE imageable_id = ? AND imageable_type = ?`,
-        [id, "App\\Models\\Sale"]
-      );
+    console.log(imageEditable);
 
-      const attachments = Array.isArray(req.files.attachment)
-        ? req.files.attachment
-        : [req.files.attachment];
-
-      const [[companyRow]] = await db.query(
-        "SELECT name FROM companies WHERE id = ?",
-        [company_id]
-      );
-      const [[customerRow]] = await db.query(
-        "SELECT name FROM customers WHERE id = ?",
-        [customer]
-      );
-
-      const company_name = companyRow?.name || "";
-      const customer_slug = slugify(customerRow?.name || "", {
-        lower: true,
-      });
-      const date_time = moment().format("YYYYMMDDHHmmss");
-
-      for (let i = 0; i < attachments.length; i++) {
-        const file = attachments[i];
-        const ext = path.extname(file.name);
-        const filename = `${company_name}_${reference_no}_${customer_slug}_${date_time}_${i}${ext}`;
-        const { key } = await putObject(file.data, `sales/${filename}`);
-
+    if (imageEditable === "true") {
+      if (req.files && req.files.attachment) {
         await db.query(
-          `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())`,
-          [`/${key}`, id, "App\\Models\\Sale"]
+          `DELETE FROM images WHERE imageable_id = ? AND imageable_type = ?`,
+          [id, "App\\Models\\Sale"]
+        );
+
+        const attachments = Array.isArray(req.files.attachment)
+          ? req.files.attachment
+          : [req.files.attachment];
+
+        const [[companyRow]] = await db.query(
+          "SELECT name FROM companies WHERE id = ?",
+          [company_id]
+        );
+        const [[customerRow]] = await db.query(
+          "SELECT name FROM customers WHERE id = ?",
+          [customer]
+        );
+
+        const company_name = companyRow?.name || "";
+        const customer_slug = slugify(customerRow?.name || "", {
+          lower: true,
+        });
+        const date_time = moment().format("YYYYMMDDHHmmss");
+
+        for (let i = 0; i < attachments.length; i++) {
+          const file = attachments[i];
+          const ext = path.extname(file.name);
+          const filename = `${company_name}_${reference_no}_${customer_slug}_${date_time}_${i}${ext}`;
+          const { key } = await putObject(file.data, `sales/${filename}`);
+
+          await db.query(
+            `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())`,
+            [`/${key}`, id, "App\\Models\\Sale"]
+          );
+        }
+      } else {
+        await db.query(
+          `DELETE FROM images WHERE imageable_id = ? AND imageable_type = ?`,
+          [id, "App\\Models\\Sale"]
         );
       }
     }
