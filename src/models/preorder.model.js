@@ -1316,8 +1316,15 @@ exports.getReceivedOrderDetail = async (req) => {
 exports.updateReceivedOrder = async (req) => {
   const connection = await db.getConnection();
   try {
-    const { id, reference_no, store, note, shipping_carrier, total_amount } =
-      req.body;
+    const {
+      id,
+      reference_no,
+      store,
+      note,
+      shipping_carrier,
+      total_amount,
+      imageEditable,
+    } = req.body;
 
     if (!reference_no || !store) {
       throw new Error("Missing required fields");
@@ -1357,6 +1364,7 @@ exports.updateReceivedOrder = async (req) => {
       `DELETE FROM purchase_order_items WHERE purchase_id = ?`,
       [id]
     );
+
     await connection.query(
       `DELETE FROM images WHERE imageable_type = 'App\\Models\\PurchaseItem' AND imageable_id IN (SELECT id FROM purchase_order_items WHERE purchase_id = ?)`,
       [id]
@@ -1418,26 +1426,33 @@ exports.updateReceivedOrder = async (req) => {
       }
     }
 
-    if (req.files?.attachment) {
-      await connection.query(
-        `DELETE FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseOrders' AND imageable_id = ?`,
-        [id]
-      );
-
-      const imageName = `${supplier_id}_${reference_no}_${id}`;
-      const images = Array.isArray(req.files.attachment)
-        ? req.files.attachment
-        : [req.files.attachment];
-
-      for (const file of images) {
-        const ext = path.extname(file.name);
-        const filename = `purchase_orders/${imageName}_${v4()}${ext}`;
-        const { key } = await putObject(file.data, filename);
-
+    if (imageEditable === "true") {
+      if (req.files?.attachment) {
         await connection.query(
-          `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at)
-           VALUES (?, ?, ?, NOW(), NOW())`,
-          [`/${key}`, id, "App\\Models\\PurchaseOrders"]
+          `DELETE FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseOrders' AND imageable_id = ?`,
+          [id]
+        );
+
+        const imageName = `${supplier_id}_${reference_no}_${id}`;
+        const images = Array.isArray(req.files.attachment)
+          ? req.files.attachment
+          : [req.files.attachment];
+
+        for (const file of images) {
+          const ext = path.extname(file.name);
+          const filename = `purchase_orders/${imageName}_${v4()}${ext}`;
+          const { key } = await putObject(file.data, filename);
+
+          await connection.query(
+            `INSERT INTO images (path, imageable_id, imageable_type, created_at, updated_at)
+             VALUES (?, ?, ?, NOW(), NOW())`,
+            [`/${key}`, id, "App\\Models\\PurchaseOrders"]
+          );
+        }
+      } else {
+        await connection.query(
+          `DELETE FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseOrders' AND imageable_id = ?`,
+          [id]
         );
       }
     }
