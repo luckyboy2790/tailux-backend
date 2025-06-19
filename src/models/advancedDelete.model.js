@@ -1,6 +1,5 @@
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
-const { Op } = require("sequelize");
 const db = require("../config/db");
 const cache = new Map();
 
