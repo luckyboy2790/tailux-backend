@@ -1351,6 +1351,7 @@ exports.getPaymentsReport = async (req) => {
       endDate,
       per_page = 15,
       page = 1,
+      sort_by_date = "desc",
     } = req.query;
 
     const filters = [];
@@ -1426,7 +1427,7 @@ exports.getPaymentsReport = async (req) => {
        LEFT JOIN sales s ON p.paymentable_type = 'App\\\\Models\\\\Sale' AND p.paymentable_id = s.id
        LEFT JOIN purchases pu ON p.paymentable_type = 'App\\\\Models\\\\Purchase' AND p.paymentable_id = pu.id
        ${whereClause}
-       ORDER BY p.timestamp DESC
+       ORDER BY p.timestamp ${sort_by_date === "asc" ? "ASC" : "DESC"}
        LIMIT ? OFFSET ?`,
       [...values, parseInt(per_page), offset]
     );
