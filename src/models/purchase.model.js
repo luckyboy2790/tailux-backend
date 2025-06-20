@@ -140,6 +140,22 @@ exports.searchPurchases = async (filters, user) => {
       purchaseIds
     );
 
+    const paymentIds = payments.map((p) => p.id);
+
+    const [paymentImages] = paymentIds.length
+      ? await db.query(
+          `
+      SELECT *, imageable_id AS payment_id,
+             CONCAT('http://your-domain.com/storage', path) AS src,
+             'image' AS type
+      FROM images
+      WHERE imageable_type = 'App\\\\Models\\\\Payment'
+        AND imageable_id IN (${paymentIds.map(() => "?").join(",")})
+      `,
+          paymentIds
+        )
+      : [[]];
+
     const [preturns] = await db.query(
       `
       SELECT *, purchase_id
@@ -149,7 +165,23 @@ exports.searchPurchases = async (filters, user) => {
       purchaseIds
     );
 
-    const [images] = await db.query(
+    const preturnIds = preturns.map((p) => p.id);
+
+    const [preturnImages] = preturnIds.length
+      ? await db.query(
+          `
+      SELECT *, imageable_id AS preturn_id,
+             CONCAT('http://your-domain.com/storage', path) AS src,
+             'image' AS type
+      FROM images
+      WHERE imageable_type = 'App\\\\Models\\\\Preturn'
+        AND imageable_id IN (${preturnIds.map(() => "?").join(",")})
+      `,
+          preturnIds
+        )
+      : [[]];
+
+    const [purchaseImages] = await db.query(
       `
       SELECT *, imageable_id AS purchase_id,
              CONCAT('http://your-domain.com/storage', path) AS src,
@@ -174,7 +206,9 @@ exports.searchPurchases = async (filters, user) => {
     const orderMap = mapById(orders);
     const paymentMap = mapById(payments);
     const returnMap = mapById(preturns);
-    const imageMap = mapById(images);
+    const imageMap = mapById(purchaseImages);
+    const paymentImageMap = mapById(paymentImages, "payment_id");
+    const preturnImageMap = mapById(preturnImages, "preturn_id");
 
     const enriched = purchaseRows.map((row) => {
       const totalPaid = (paymentMap[row.id] || [])
@@ -183,6 +217,16 @@ exports.searchPurchases = async (filters, user) => {
       const totalReturned = (returnMap[row.id] || [])
         .filter((item) => item.status === 1)
         .reduce((sum, r) => sum + parseFloat(r.amount), 0);
+
+      const paymentsWithImages = (paymentMap[row.id] || []).map((p) => ({
+        ...p,
+        images: paymentImageMap[p.id] || [],
+      }));
+
+      const preturnsWithImages = (returnMap[row.id] || []).map((r) => ({
+        ...r,
+        images: preturnImageMap[r.id] || [],
+      }));
 
       return {
         ...row,
@@ -215,8 +259,8 @@ exports.searchPurchases = async (filters, user) => {
             alert_quantity: order.product_alert_quantity,
           },
         })),
-        payments: paymentMap[row.id] || [],
-        preturns: returnMap[row.id] || [],
+        payments: paymentsWithImages,
+        preturns: preturnsWithImages,
         images: imageMap[row.id] || [],
         company: {
           id: row.company_id,

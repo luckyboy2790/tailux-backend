@@ -34,22 +34,18 @@ exports.searchSales = async (req, res) => {
         u.username as user_username,
         u.first_name as user_first_name,
         u.last_name as user_last_name,
-
         u.email as user_email,
         u.phone_number as user_phone_number,
         u.role as user_role,
         u.status as user_status,
-
         comp.id as company_id,
         comp.name as company_name,
         comp.created_at as company_created_at,
         comp.updated_at as company_updated_at,
-
         st.id as store_id,
         st.name as store_name,
         st.created_at as store_created_at,
         st.updated_at as store_updated_at,
-
         (SELECT SUM(amount) FROM payments WHERE paymentable_id = s.id AND paymentable_type LIKE '%Sale%') as paid_amount
       FROM sales s
       LEFT JOIN customers c ON s.customer_id = c.id
@@ -105,76 +101,57 @@ exports.searchSales = async (req, res) => {
 
     const transformedSales = await Promise.all(
       sales.map(async (sale) => {
-        const customer = sale.customer_id
-          ? {
-              id: sale.customer_id,
-              name: sale.customer_name,
-              company: sale.customer_company,
-              email: sale.customer_email,
-              phone_number: sale.customer_phone_number,
-              address: sale.customer_address,
-              city: sale.customer_city,
-              created_at: sale.customer_created_at,
-              updated_at: sale.customer_updated_at,
-            }
-          : null;
+        const customer = sale.customer_id ? {
+          id: sale.customer_id,
+          name: sale.customer_name,
+          company: sale.customer_company,
+          email: sale.customer_email,
+          phone_number: sale.customer_phone_number,
+          address: sale.customer_address,
+          city: sale.customer_city,
+          created_at: sale.customer_created_at,
+          updated_at: sale.customer_updated_at,
+        } : null;
 
-        const user = sale.user_id
-          ? {
-              id: sale.user_id,
-              username: sale.user_username,
-              first_name: sale.user_first_name,
-              last_name: sale.user_last_name,
-              email: sale.user_email,
-              phone_number: sale.user_phone_number,
-              role: sale.user_role,
-              status: sale.user_status,
-              company: {
-                id: sale.company_id,
-                name: sale.company_name,
-              },
-            }
-          : null;
+        const user = sale.user_id ? {
+          id: sale.user_id,
+          username: sale.user_username,
+          first_name: sale.user_first_name,
+          last_name: sale.user_last_name,
+          email: sale.user_email,
+          phone_number: sale.user_phone_number,
+          role: sale.user_role,
+          status: sale.user_status,
+          company: {
+            id: sale.company_id,
+            name: sale.company_name,
+          },
+        } : null;
 
-        const company = sale.company_id
-          ? {
-              id: sale.company_id,
-              name: sale.company_name,
-              created_at: sale.company_created_at,
-              updated_at: sale.company_updated_at,
-            }
-          : null;
+        const company = sale.company_id ? {
+          id: sale.company_id,
+          name: sale.company_name,
+          created_at: sale.company_created_at,
+          updated_at: sale.company_updated_at,
+        } : null;
 
-        const store = sale.store_id
-          ? {
-              id: sale.store_id,
-              name: sale.store_name,
-              created_at: sale.store_created_at,
-              updated_at: sale.store_updated_at,
-              company: {
-                id: sale.company_id,
-                name: sale.company_name,
-              },
-            }
-          : null;
+        const store = sale.store_id ? {
+          id: sale.store_id,
+          name: sale.store_name,
+          created_at: sale.store_created_at,
+          updated_at: sale.store_updated_at,
+          company: {
+            id: sale.company_id,
+            name: sale.company_name,
+          },
+        } : null;
 
         [
-          "customer_id",
-          "customer_name",
-          "customer_company",
-          "customer_email",
-          "customer_phone_number",
-          "customer_address",
-          "customer_city",
-          "customer_created_at",
-          "customer_updated_at",
-          "user_username",
-          "user_first_name",
-          "user_last_name",
-          "user_email",
-          "user_phone_number",
-          "user_role",
-          "user_status",
+          "customer_id", "customer_name", "customer_company", "customer_email",
+          "customer_phone_number", "customer_address", "customer_city",
+          "customer_created_at", "customer_updated_at", "user_username",
+          "user_first_name", "user_last_name", "user_email", "user_phone_number",
+          "user_role", "user_status"
         ].forEach((field) => delete sale[field]);
 
         const [images] = await db.query(
@@ -186,6 +163,21 @@ exports.searchSales = async (req, res) => {
           `SELECT * FROM payments WHERE paymentable_id = ? AND paymentable_type LIKE '%Sale%'`,
           [sale.id]
         );
+
+        const paymentIds = payments.map(p => p.id);
+
+        const [paymentImages] = paymentIds.length ? await db.query(
+          `SELECT *, imageable_id AS payment_id, CONCAT('http://your-domain.com/storage', path) AS src FROM images WHERE imageable_type = 'App\\\\Models\\\\Payment' AND imageable_id IN (${paymentIds.map(() => '?').join(',')})`,
+          paymentIds
+        ) : [[]];
+
+        const paymentImageMap = {};
+        for (const img of paymentImages) {
+          if (!paymentImageMap[img.payment_id]) paymentImageMap[img.payment_id] = [];
+          paymentImageMap[img.payment_id].push(img);
+        }
+
+        payments.forEach(p => p.images = paymentImageMap[p.id] || []);
 
         return {
           ...sale,
@@ -202,8 +194,7 @@ exports.searchSales = async (req, res) => {
     for (const sale of transformedSales) {
       const [orders] = await db.query(
         `
-        SELECT o.*,
-          p.id as 'product.id', p.name as 'product.name', p.code as 'product.code',
+        SELECT o.*, p.id as 'product.id', p.name as 'product.name', p.code as 'product.code',
           p.unit as 'product.unit', p.cost as 'product.cost', p.price as 'product.price',
           p.alert_quantity as 'product.alert_quantity', p.created_at as 'product.created_at',
           p.updated_at as 'product.updated_at'
@@ -230,38 +221,21 @@ exports.searchSales = async (req, res) => {
     }
 
     const last_page = Math.ceil(total / per_page);
-    const path = `${req.protocol}://${req.get("host")}${req.baseUrl}${
-      req.path
-    }`;
+    const path = `${req.protocol}://${req.get("host")}${req.baseUrl}${req.path}`;
 
     const response = {
       status: "Success",
       data: {
         current_page: parseInt(page),
         data: transformedSales,
-        first_page_url: `${path}?${buildQueryString({
-          ...req.query,
-          page: 1,
-        })}`,
+        first_page_url: `${path}?${buildQueryString({ ...req.query, page: 1 })}`,
         from: offset + 1,
         last_page,
-        last_page_url: `${path}?${buildQueryString({
-          ...req.query,
-          page: last_page,
-        })}`,
-        next_page_url:
-          page < last_page
-            ? `${path}?${buildQueryString({
-                ...req.query,
-                page: parseInt(page) + 1,
-              })}`
-            : null,
+        last_page_url: `${path}?${buildQueryString({ ...req.query, page: last_page })}`,
+        next_page_url: page < last_page ? `${path}?${buildQueryString({ ...req.query, page: parseInt(page) + 1 })}` : null,
         path,
         per_page: parseInt(per_page),
-        prev_page_url:
-          page > 1
-            ? `${path}?${buildQueryString({ ...req.query, page: page - 1 })}`
-            : null,
+        prev_page_url: page > 1 ? `${path}?${buildQueryString({ ...req.query, page: page - 1 })}` : null,
         to: Math.min(offset + per_page, total),
         total,
       },
@@ -278,6 +252,7 @@ exports.searchSales = async (req, res) => {
     };
   }
 };
+
 
 function buildQueryString(params) {
   return Object.keys(params)
