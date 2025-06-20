@@ -32,42 +32,31 @@ exports.searchPurchaseOrders = async (req) => {
 
     if (req.query.startDate && req.query.endDate) {
       if (req.query.startDate === req.query.endDate) {
-        filterConditions.push("DATE(po.timestamp) = ?");
-        values.push(req.query.startDate);
+        const start = `${req.query.startDate} 00:00:00`;
+        const end = `${req.query.endDate} 23:59:59`;
+        filterConditions.push("po.timestamp BETWEEN ? AND ?");
+        values.push(start, end);
       } else {
-        filterConditions.push("DATE(po.timestamp) BETWEEN ? AND ?");
-        values.push(req.query.startDate, req.query.endDate);
-      }
-    }
-
-    if (req.query.expiryStartDate && req.query.expiryEndDate) {
-      if (req.query.expiryStartDate === req.query.expiryEndDate) {
-        filterConditions.push("DATE(po.expiry_date) = ?");
-        values.push(req.query.expiryStartDate);
-      } else {
-        filterConditions.push("DATE(po.expiry_date) BETWEEN ? AND ?");
-        values.push(req.query.expiryStartDate, req.query.expiryEndDate);
+        const start = `${req.query.startDate} 00:00:00`;
+        const end = `${req.query.endDate} 23:59:59`;
+        filterConditions.push("po.timestamp BETWEEN ? AND ?");
+        values.push(start, end);
       }
     }
 
     if (req.query.keyword) {
-      filterConditions.push(
-        "(po.reference_no LIKE ? OR po.timestamp LIKE ? OR po.total_amount LIKE ?)"
-      );
+      filterConditions.push(`
+        (
+          CAST(po.reference_no AS CHAR) LIKE ?
+          OR s.name LIKE ?
+          OR s.company LIKE ?
+        )
+      `);
       values.push(
-        `%${req.query.keyword}%`,
+        `%${req.query.keyword.toString()}%`,
         `%${req.query.keyword}%`,
         `%${req.query.keyword}%`
       );
-      filterConditions.push(
-        "EXISTS (SELECT 1 FROM companies c WHERE c.id = po.company_id AND c.name LIKE ?)"
-      );
-      values.push(`%${req.query.keyword}%`);
-
-      filterConditions.push(
-        "EXISTS (SELECT 1 FROM suppliers s WHERE s.id = po.supplier_id AND (s.company LIKE ? OR s.name LIKE ?))"
-      );
-      values.push(`%${req.query.keyword}%`, `%${req.query.keyword}%`);
     }
 
     const whereClause = filterConditions.length
@@ -81,21 +70,22 @@ exports.searchPurchaseOrders = async (req) => {
     const countQuery = `
       SELECT COUNT(*) AS total
       FROM pre_orders po
+      LEFT JOIN suppliers s ON s.id = po.supplier_id
       ${whereClause}
     `;
     const [countResult] = await db.query(countQuery, values);
     const total = countResult[0]?.total || 0;
 
     const orderQuery = `
-      SELECT po.*, s.name AS supplier_name, s.email AS supplier_email, s.company AS supplier_company, c.name AS company_name
+      SELECT po.*, s.name AS supplier_name, s.email AS supplier_email, s.company AS supplier_company
       FROM pre_orders po
       LEFT JOIN suppliers s ON s.id = po.supplier_id
-      LEFT JOIN companies c ON c.id = po.company_id
       ${whereClause}
       ORDER BY po.timestamp DESC
       LIMIT ? OFFSET ?
     `;
     const orderValues = [...values, perPage, offset];
+
     const [purchaseOrderRows] = await db.query(orderQuery, orderValues);
 
     const baseUrl =
