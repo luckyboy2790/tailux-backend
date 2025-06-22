@@ -178,7 +178,7 @@ exports.searchPending = async (req) => {
       const [imageResults] = await db.query(
         `SELECT *, CONCAT('http://127.0.0.1:8000/storage', path) as src
          FROM images
-         WHERE imageable_id IN (?) AND imageable_type = 'App\\Models\\Payment'`,
+         WHERE imageable_id IN (?) AND imageable_type = 'App\\\\Models\\\\Payment'`,
         [paymentIds]
       );
       images = imageResults;
