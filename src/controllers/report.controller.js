@@ -101,7 +101,7 @@ exports.getCustomersReportSearch = async (req, res) => {
 
 exports.getSuppliersReportSearch = async (req, res) => {
   try {
-    const storeData = await Report.getSuppliersReport(req.query);
+    const storeData = await Report.getSuppliersReport(req);
     res.json(storeData);
   } catch (err) {
     res.status(500).json({ error: "Server Error" });
