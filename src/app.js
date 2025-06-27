@@ -4,10 +4,7 @@ const fileUpload = require("express-fileupload");
 const app = express();
 
 const corsOptions = {
-  origin: [
-    "http://localhost:5173",
-    "https://your-production-domain.com",
-  ],
+  origin: ["http://localhost:5173", "https://your-production-domain.com"],
   methods: ["GET", "POST", "PUT", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
@@ -35,7 +32,6 @@ const customerRoutes = require("./routes/customer.routes");
 const paymentRoutes = require("./routes/payment.routes");
 const productRoutes = require("./routes/product.routes");
 const preOrderRoutes = require("./routes/preorder.routes");
-const receivedOrderRoutes = require("./routes/receivedOrder.routes");
 const reportRoutes = require("./routes/report.routes");
 const storeRoutes = require("./routes/store.routes");
 const siteSettingRoutes = require("./routes/siteSetting.route");
@@ -55,7 +51,6 @@ app.use("/api/customer", customerRoutes);
 app.use("/api/payment", paymentRoutes);
 app.use("/api/product", productRoutes);
 app.use("/api/purchase_order", preOrderRoutes);
-app.use("/api/recieved_order", receivedOrderRoutes);
 app.use("/api/report", reportRoutes);
 app.use("/api/store", storeRoutes);
 app.use("/api/site_setting", siteSettingRoutes);

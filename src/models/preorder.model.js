@@ -996,6 +996,11 @@ exports.searchReceivedOrders = async (req) => {
       values.push(req.query.company_id);
     }
 
+    if (req.user?.role !== "admin") {
+      filterConditions.push("p.store_id = ?");
+      values.push(req.user.first_store_id);
+    }
+
     if (req.query.keyword) {
       const keyword = `%${req.query.keyword}%`;
       filterConditions.push(

@@ -39,14 +39,12 @@ const verifyToken = async (req, res, next) => {
 
     const user = users[0];
 
-    // Get company
     const [companies] = await db.query(
       "SELECT * FROM companies WHERE id = ? LIMIT 1",
       [user.company_id]
     );
     const company = companies[0] || null;
 
-    // Get first store of the company
     let first_store_id = 1;
     if (company) {
       const [stores] = await db.query(
@@ -56,12 +54,10 @@ const verifyToken = async (req, res, next) => {
       first_store_id = stores[0]?.id || 1;
     }
 
-    // Compose name
     const fullName =
       [user.first_name, user.last_name].filter(Boolean).join(" ") ||
       user.username;
 
-    // Compose final user object
     req.user = {
       ...user,
       name: fullName,

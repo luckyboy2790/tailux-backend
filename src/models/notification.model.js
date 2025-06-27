@@ -5,8 +5,6 @@ exports.getNotifications = async (req) => {
     const userId = req.user.id;
     const userRole = req.user.role;
 
-    console.log(req.user.role);
-
     let notificationCountQuery = `SELECT COUNT(*) AS count FROM notifications`;
     let notificationsQuery = `SELECT * FROM notifications ORDER BY created_at DESC LIMIT 5`;
     let purchaseNotificationsQuery = `SELECT * FROM notifications WHERE notifiable_type = 'App\\\\Models\\\\Purchase' ORDER BY created_at DESC LIMIT 5`;
