@@ -720,6 +720,8 @@ exports.concurrentPaymentCreate = async (req) => {
   try {
     const { date, reference_no, note = "", purchases = "[]" } = req.body;
 
+    const role = req.user?.role;
+
     if (!date || !reference_no || !purchases) {
       throw new Error(
         "Missing required fields: date, reference_no, or purchases"
@@ -778,7 +780,7 @@ exports.concurrentPaymentCreate = async (req) => {
           paymentable_id,
           paymentableType,
           note,
-          0,
+          role === "secretary" ? 0 : 1,
         ]
       );
 
