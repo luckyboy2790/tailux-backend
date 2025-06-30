@@ -692,7 +692,7 @@ exports.create = async (req) => {
     );
 
     if (exists.length > 0) {
-      throw new Error("Reference number already taken");
+      throw new Error("reference_already_taken");
     }
 
     const timestamp = moment(date).format("YYYY-MM-DD HH:mm:ss");
@@ -813,11 +813,10 @@ exports.create = async (req) => {
   } catch (error) {
     console.error(error);
 
-    // Return structured error response similar to PHP version
     if (
-      error.message.includes("Missing required fields") ||
-      error.message.includes("Please select at least one product") ||
-      error.message.includes("Reference number already taken")
+      error.message.includes("missing_required_fields") ||
+      error.message.includes("select_at_least_one_product") ||
+      error.message.includes("reference_already_taken")
     ) {
       return {
         status: "error",

@@ -31,6 +31,10 @@ exports.createPurchase = async (req, res) => {
   try {
     const purchase = await Purchase.create(req);
 
+    if(purchase.status === "error") {
+      return res.status(422).json({ error: purchase.message });
+    }
+
     res.json(purchase);
   } catch (err) {
     res.status(500).json({ error: "Server Error" });
