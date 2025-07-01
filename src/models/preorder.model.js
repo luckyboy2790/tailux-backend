@@ -1380,7 +1380,7 @@ exports.updateReceivedOrder = async (req) => {
       throw new Error("Invalid purchase order ID");
     }
 
-    const { purchase_order_id, supplier_id } = existing[0];
+    const { supplier_id } = existing[0];
 
     const [dupRef] = await connection.query(
       `SELECT id FROM purchase_orders WHERE reference_no = ? AND supplier_id = ? AND id != ? LIMIT 1`,
@@ -1468,7 +1468,7 @@ exports.updateReceivedOrder = async (req) => {
       }
     }
 
-    if (imageEditable === "true") {
+    if (Number(imageEditable) === 1) {
       if (req.files?.attachment) {
         await connection.query(
           `DELETE FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseOrders' AND imageable_id = ?`,
@@ -1495,6 +1495,36 @@ exports.updateReceivedOrder = async (req) => {
         await connection.query(
           `DELETE FROM images WHERE imageable_type = 'App\\\\Models\\\\PurchaseOrders' AND imageable_id = ?`,
           [id]
+        );
+      }
+    }
+
+    console.log(Number(imageEditable));
+
+    if (Number(imageEditable) === 2) {
+      const fileNames =
+        typeof req.body.fileName === "string"
+          ? req.body.fileName.split(",").map((f) => f.trim())
+          : [];
+
+      const [existingImages] = await connection.query(
+        `SELECT id, path FROM images WHERE imageable_id = ? AND imageable_type = ?`,
+        [id, "App\\Models\\PurchaseOrders"]
+      );
+
+      console.log(existingImages);
+
+      const toDelete = existingImages.filter((img) => {
+        return !fileNames.includes(img.path);
+      });
+
+      console.log(toDelete);
+
+      if (toDelete.length > 0) {
+        const deleteIds = toDelete.map((img) => img.id);
+        await connection.query(
+          `DELETE FROM images WHERE id IN (${deleteIds.map(() => "?").join(",")})`,
+          deleteIds
         );
       }
     }
