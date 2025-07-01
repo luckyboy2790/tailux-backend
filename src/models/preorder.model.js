@@ -482,7 +482,7 @@ exports.update = async (req) => {
 
     await db.query(`DELETE FROM pre_order_items WHERE pre_order_id = ?`, [id]);
 
-    if (imageEditable === "true") {
+    if (Number(imageEditable) === 1) {
       if (req.files && req.files.attachment) {
         const attachments = Array.isArray(req.files.attachment)
           ? req.files.attachment
@@ -516,6 +516,30 @@ exports.update = async (req) => {
       }
     }
 
+    if (Number(imageEditable) === 2) {
+      const fileNames =
+        typeof req.body.fileName === "string"
+          ? req.body.fileName.split(",").map((f) => f.trim())
+          : [];
+
+      const [existingImages] = await db.query(
+        `SELECT id, path FROM images WHERE imageable_id = ? AND imageable_type = ?`,
+        [id, "App\\Models\\PurchaseOrder"]
+      );
+
+      const toDelete = existingImages.filter(
+        (img) => !fileNames.includes(img.path)
+      );
+
+      if (toDelete.length > 0) {
+        const deleteIds = toDelete.map((img) => img.id);
+        await db.query(
+          `DELETE FROM images WHERE id IN (${deleteIds.map(() => "?").join(",")})`,
+          deleteIds
+        );
+      }
+    }
+
     const imageMap = {};
     for (const field in req.files) {
       const match = field.match(/^images\[(\d+)\]/);
@@ -537,6 +561,7 @@ exports.update = async (req) => {
         category,
         imageEditable,
         original_id,
+        fileName,
       } = item;
 
       const _cost = Number(product_cost) || 0;
@@ -571,7 +596,7 @@ exports.update = async (req) => {
       const pre_order_item_id = itemInsert.insertId;
       const images = imageMap[i] || [];
 
-      if (imageEditable === true || imageEditable === "true") {
+      if (Number(imageEditable) === 1) {
         await db.query(
           `DELETE FROM images WHERE imageable_type = 'App\\Models\\PurchaseOrderItem' AND imageable_id = ?`,
           [original_id]
@@ -593,6 +618,28 @@ exports.update = async (req) => {
           `UPDATE images SET imageable_id = ? WHERE imageable_id = ?`,
           [pre_order_item_id, original_id]
         );
+      }
+
+      if (Number(imageEditable) === 2) {
+        const fileNames = Array.isArray(fileName) ? fileName : [];
+
+        const [existingImages] = await db.query(
+          `SELECT id, path FROM images WHERE imageable_id = ? AND imageable_type = ?`,
+          [pre_order_item_id, "App\\Models\\PurchaseOrderItem"]
+        );
+
+        const toDelete = existingImages.filter((img) => {
+          const filename = img.path.split("/").pop();
+          return !fileNames.includes(filename);
+        });
+
+        if (toDelete.length > 0) {
+          const deleteIds = toDelete.map((img) => img.id);
+          await db.query(
+            `DELETE FROM images WHERE id IN (${deleteIds.map(() => "?").join(",")})`,
+            deleteIds
+          );
+        }
       }
     }
 
