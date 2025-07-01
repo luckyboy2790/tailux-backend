@@ -613,13 +613,11 @@ exports.getPurchaseDetail = async (req) => {
 
     const totalAmount = (purchase.grand_total || 0) - returnedAmount;
 
-    // Attach product to each order
     const productMap = Object.fromEntries(productRows.map((p) => [p.id, p]));
     ordersRows.forEach((order) => {
       order.product = productMap[order.product_id] || null;
     });
 
-    // Attach images to each payment
     paymentsRows.forEach((payment) => {
       payment.images = paymentImagesRows.filter(
         (img) => img.imageable_id === payment.id
@@ -858,7 +856,7 @@ exports.update = async (req) => {
       grand_total,
       note = "",
       orders_json = "[]",
-      imageEditable = false,
+      imageEditable = 0,
     } = req.body;
 
     if (!id || !date || !reference_no || !store || !supplier) {
@@ -867,7 +865,6 @@ exports.update = async (req) => {
       );
     }
 
-    // Ensure authenticated user
     if (!req.user || !req.user.id) {
       throw new Error("Unauthorized: User not authenticated");
     }
@@ -886,7 +883,6 @@ exports.update = async (req) => {
       throw new Error("Reference number already taken");
     }
 
-    // Check if purchase exists and user has permission to edit it
     const [purchaseRow] = await db.query(
       "SELECT * FROM purchases WHERE id = ?",
       [id]
@@ -896,7 +892,6 @@ exports.update = async (req) => {
       throw new Error("Purchase not found");
     }
 
-    // If user is not admin and trying to edit a purchase from another company
     if (
       req.user.role !== "admin" &&
       purchaseRow[0].company_id !== req.user.company_id
@@ -939,7 +934,7 @@ exports.update = async (req) => {
       ]
     );
 
-    if (imageEditable === "true") {
+    if (Number(imageEditable) === 1) {
       if (req.files && req.files.attachment) {
         await db.query(
           `DELETE FROM images WHERE imageable_id = ? AND imageable_type = ?`,
@@ -981,6 +976,30 @@ exports.update = async (req) => {
         await db.query(
           `DELETE FROM images WHERE imageable_id = ? AND imageable_type = ?`,
           [id, "App\\Models\\Purchase"]
+        );
+      }
+    }
+
+    if (Number(imageEditable) === 2) {
+      const fileNames =
+        typeof req.body.fileName === "string"
+          ? req.body.fileName.split(",").map((f) => f.trim())
+          : [];
+
+      const [existingImages] = await db.query(
+        `SELECT id, path FROM images WHERE imageable_id = ? AND imageable_type = ?`,
+        [id, "App\\Models\\Purchase"]
+      );
+
+      const toDelete = existingImages.filter(
+        (img) => !fileNames.includes(img.path)
+      );
+
+      if (toDelete.length > 0) {
+        const deleteIds = toDelete.map((img) => img.id);
+        await db.query(
+          `DELETE FROM images WHERE id IN (${deleteIds.map(() => "?").join(",")})`,
+          deleteIds
         );
       }
     }
@@ -1075,7 +1094,6 @@ exports.update = async (req) => {
   } catch (error) {
     console.error(error);
 
-    // Return structured error response similar to PHP version
     if (
       error.message.includes("Missing required fields") ||
       error.message.includes("Please select at least one product") ||
@@ -1116,7 +1134,6 @@ exports.delete = async (req) => {
   try {
     const { id } = req.params;
 
-    // Ensure authenticated user
     if (!req.user || !req.user.id) {
       throw new Error("Unauthorized: User not authenticated");
     }
@@ -1144,7 +1161,6 @@ exports.delete = async (req) => {
       throw new Error("You are not allowed to perform this action");
     }
 
-    // Check if user belongs to the same company (unless admin)
     if (userRole !== "admin" && purchase.company_id !== req.user.company_id) {
       throw new Error("You don't have permission to delete this purchase");
     }
@@ -1160,7 +1176,6 @@ exports.delete = async (req) => {
     await db.query(`DELETE FROM purchases WHERE id = ?`, [id]);
 
     if (purchase.status === 0 && userRole === "admin") {
-      // Get supplier name
       const [[supplierData]] = await db.query(
         `SELECT company FROM suppliers WHERE id = ?`,
         [purchase.supplier_id]
@@ -1188,7 +1203,6 @@ exports.delete = async (req) => {
   } catch (error) {
     console.error(error);
 
-    // Return structured error response
     if (error.message.includes("Missing purchase ID")) {
       return {
         status: "error",
@@ -1227,12 +1241,10 @@ exports.delete = async (req) => {
 
 exports.allPurchase = async (req) => {
   try {
-    // Ensure authenticated user
     if (!req.user || !req.user.id) {
       throw new Error("Unauthorized: User not authenticated");
     }
 
-    // Build query with filters
     let query = `
       SELECT
         p.*,
@@ -1267,26 +1279,21 @@ exports.allPurchase = async (req) => {
 
     const params = [];
 
-    // Role-based filtering
     if (req.user.role === "user" || req.user.role === "secretary") {
       query += ` AND p.company_id = ?`;
       params.push(req.user.company_id);
     }
 
-    // Status filtering based on role
     if (req.user.role !== "secretary") {
       query += ` AND p.status = 1`;
     }
 
-    // Additional filters from query parameters if provided
     if (req.query) {
-      // Company filter
       if (req.query.company_id) {
         query += ` AND p.company_id = ?`;
         params.push(req.query.company_id);
       }
 
-      // Date range filter
       if (req.query.startDate && req.query.endDate) {
         if (req.query.startDate === req.query.endDate) {
           query += ` AND DATE(p.timestamp) = ?`;
@@ -1297,7 +1304,6 @@ exports.allPurchase = async (req) => {
         }
       }
 
-      // Expiry date range filter
       if (req.query.expiryStartDate && req.query.expiryEndDate) {
         if (req.query.expiryStartDate === req.query.expiryEndDate) {
           query += ` AND DATE(p.expiry_date) = ?`;
@@ -1308,9 +1314,7 @@ exports.allPurchase = async (req) => {
         }
       }
 
-      // Keyword search
       if (req.query.keyword) {
-        // First get IDs from related tables
         const keywordLike = `%${req.query.keyword}%`;
 
         const [companyIds] = await db.query(
@@ -1339,7 +1343,6 @@ exports.allPurchase = async (req) => {
 
         params.push(keywordLike, keywordLike, keywordLike);
 
-        // Add company ID conditions if there are any matches
         if (companyIdList.length > 0) {
           query += ` OR p.company_id IN (${companyIdList
             .map(() => "?")
@@ -1347,7 +1350,6 @@ exports.allPurchase = async (req) => {
           params.push(...companyIdList);
         }
 
-        // Add supplier ID conditions if there are any matches
         if (supplierIdList.length > 0) {
           query += ` OR p.supplier_id IN (${supplierIdList
             .map(() => "?")
@@ -1355,7 +1357,6 @@ exports.allPurchase = async (req) => {
           params.push(...supplierIdList);
         }
 
-        // Add store ID conditions if there are any matches
         if (storeIdList.length > 0) {
           query += ` OR p.store_id IN (${storeIdList
             .map(() => "?")
@@ -1366,13 +1367,11 @@ exports.allPurchase = async (req) => {
         query += `)`;
       }
 
-      // Sort by date
       const sort_by_date = req.query.sort_by_date || "desc";
       query += ` ORDER BY p.timestamp ${
         sort_by_date === "asc" ? "ASC" : "DESC"
       }`;
     } else {
-      // Default ordering
       query += ` ORDER BY p.timestamp DESC`;
     }
 
@@ -1511,7 +1510,6 @@ exports.allPurchase = async (req) => {
   } catch (error) {
     console.error(error);
 
-    // Return structured error response
     if (error.message.includes("Unauthorized")) {
       return {
         status: "error",
