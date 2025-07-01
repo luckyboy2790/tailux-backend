@@ -101,57 +101,76 @@ exports.searchSales = async (req, res) => {
 
     const transformedSales = await Promise.all(
       sales.map(async (sale) => {
-        const customer = sale.customer_id ? {
-          id: sale.customer_id,
-          name: sale.customer_name,
-          company: sale.customer_company,
-          email: sale.customer_email,
-          phone_number: sale.customer_phone_number,
-          address: sale.customer_address,
-          city: sale.customer_city,
-          created_at: sale.customer_created_at,
-          updated_at: sale.customer_updated_at,
-        } : null;
+        const customer = sale.customer_id
+          ? {
+              id: sale.customer_id,
+              name: sale.customer_name,
+              company: sale.customer_company,
+              email: sale.customer_email,
+              phone_number: sale.customer_phone_number,
+              address: sale.customer_address,
+              city: sale.customer_city,
+              created_at: sale.customer_created_at,
+              updated_at: sale.customer_updated_at,
+            }
+          : null;
 
-        const user = sale.user_id ? {
-          id: sale.user_id,
-          username: sale.user_username,
-          first_name: sale.user_first_name,
-          last_name: sale.user_last_name,
-          email: sale.user_email,
-          phone_number: sale.user_phone_number,
-          role: sale.user_role,
-          status: sale.user_status,
-          company: {
-            id: sale.company_id,
-            name: sale.company_name,
-          },
-        } : null;
+        const user = sale.user_id
+          ? {
+              id: sale.user_id,
+              username: sale.user_username,
+              first_name: sale.user_first_name,
+              last_name: sale.user_last_name,
+              email: sale.user_email,
+              phone_number: sale.user_phone_number,
+              role: sale.user_role,
+              status: sale.user_status,
+              company: {
+                id: sale.company_id,
+                name: sale.company_name,
+              },
+            }
+          : null;
 
-        const company = sale.company_id ? {
-          id: sale.company_id,
-          name: sale.company_name,
-          created_at: sale.company_created_at,
-          updated_at: sale.company_updated_at,
-        } : null;
+        const company = sale.company_id
+          ? {
+              id: sale.company_id,
+              name: sale.company_name,
+              created_at: sale.company_created_at,
+              updated_at: sale.company_updated_at,
+            }
+          : null;
 
-        const store = sale.store_id ? {
-          id: sale.store_id,
-          name: sale.store_name,
-          created_at: sale.store_created_at,
-          updated_at: sale.store_updated_at,
-          company: {
-            id: sale.company_id,
-            name: sale.company_name,
-          },
-        } : null;
+        const store = sale.store_id
+          ? {
+              id: sale.store_id,
+              name: sale.store_name,
+              created_at: sale.store_created_at,
+              updated_at: sale.store_updated_at,
+              company: {
+                id: sale.company_id,
+                name: sale.company_name,
+              },
+            }
+          : null;
 
         [
-          "customer_id", "customer_name", "customer_company", "customer_email",
-          "customer_phone_number", "customer_address", "customer_city",
-          "customer_created_at", "customer_updated_at", "user_username",
-          "user_first_name", "user_last_name", "user_email", "user_phone_number",
-          "user_role", "user_status"
+          "customer_id",
+          "customer_name",
+          "customer_company",
+          "customer_email",
+          "customer_phone_number",
+          "customer_address",
+          "customer_city",
+          "customer_created_at",
+          "customer_updated_at",
+          "user_username",
+          "user_first_name",
+          "user_last_name",
+          "user_email",
+          "user_phone_number",
+          "user_role",
+          "user_status",
         ].forEach((field) => delete sale[field]);
 
         const [images] = await db.query(
@@ -164,20 +183,23 @@ exports.searchSales = async (req, res) => {
           [sale.id]
         );
 
-        const paymentIds = payments.map(p => p.id);
+        const paymentIds = payments.map((p) => p.id);
 
-        const [paymentImages] = paymentIds.length ? await db.query(
-          `SELECT *, imageable_id AS payment_id, CONCAT('http://your-domain.com/storage', path) AS src FROM images WHERE imageable_type = 'App\\\\Models\\\\Payment' AND imageable_id IN (${paymentIds.map(() => '?').join(',')})`,
-          paymentIds
-        ) : [[]];
+        const [paymentImages] = paymentIds.length
+          ? await db.query(
+              `SELECT *, imageable_id AS payment_id, CONCAT('http://your-domain.com/storage', path) AS src FROM images WHERE imageable_type = 'App\\\\Models\\\\Payment' AND imageable_id IN (${paymentIds.map(() => "?").join(",")})`,
+              paymentIds
+            )
+          : [[]];
 
         const paymentImageMap = {};
         for (const img of paymentImages) {
-          if (!paymentImageMap[img.payment_id]) paymentImageMap[img.payment_id] = [];
+          if (!paymentImageMap[img.payment_id])
+            paymentImageMap[img.payment_id] = [];
           paymentImageMap[img.payment_id].push(img);
         }
 
-        payments.forEach(p => p.images = paymentImageMap[p.id] || []);
+        payments.forEach((p) => (p.images = paymentImageMap[p.id] || []));
 
         return {
           ...sale,
@@ -232,10 +254,16 @@ exports.searchSales = async (req, res) => {
         from: offset + 1,
         last_page,
         last_page_url: `${path}?${buildQueryString({ ...req.query, page: last_page })}`,
-        next_page_url: page < last_page ? `${path}?${buildQueryString({ ...req.query, page: parseInt(page) + 1 })}` : null,
+        next_page_url:
+          page < last_page
+            ? `${path}?${buildQueryString({ ...req.query, page: parseInt(page) + 1 })}`
+            : null,
         path,
         per_page: parseInt(per_page),
-        prev_page_url: page > 1 ? `${path}?${buildQueryString({ ...req.query, page: page - 1 })}` : null,
+        prev_page_url:
+          page > 1
+            ? `${path}?${buildQueryString({ ...req.query, page: page - 1 })}`
+            : null,
         to: Math.min(offset + per_page, total),
         total,
       },
@@ -252,7 +280,6 @@ exports.searchSales = async (req, res) => {
     };
   }
 };
-
 
 function buildQueryString(params) {
   return Object.keys(params)
@@ -603,9 +630,7 @@ exports.update = async (req) => {
       [timestamp, reference_no, company_id, customer, note, grand_total, id]
     );
 
-    console.log(imageEditable);
-
-    if (imageEditable === "true") {
+    if (Number(imageEditable) === 1) {
       if (req.files && req.files.attachment) {
         await db.query(
           `DELETE FROM images WHERE imageable_id = ? AND imageable_type = ?`,
@@ -646,6 +671,30 @@ exports.update = async (req) => {
         await db.query(
           `DELETE FROM images WHERE imageable_id = ? AND imageable_type = ?`,
           [id, "App\\Models\\Sale"]
+        );
+      }
+    }
+
+    if (Number(imageEditable) === 2) {
+      const fileNames =
+        typeof req.body.fileName === "string"
+          ? req.body.fileName.split(",").map((f) => f.trim())
+          : [];
+
+      const [existingImages] = await db.query(
+        `SELECT id, path FROM images WHERE imageable_id = ? AND imageable_type = ?`,
+        [id, "App\\Models\\Sale"]
+      );
+
+      const toDelete = existingImages.filter(
+        (img) => !fileNames.includes(img.path)
+      );
+
+      if (toDelete.length > 0) {
+        const deleteIds = toDelete.map((img) => img.id);
+        await db.query(
+          `DELETE FROM images WHERE id IN (${deleteIds.map(() => "?").join(",")})`,
+          deleteIds
         );
       }
     }
