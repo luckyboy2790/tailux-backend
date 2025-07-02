@@ -63,28 +63,14 @@ exports.searchPurchases = async (filters, user) => {
 
     const purchaseQuery = `
       SELECT
-        p.*,
-        s.id AS supplier_id,
-        s.name AS supplier_name,
-        s.company AS supplier_company,
-        s.email AS supplier_email,
-        s.phone_number AS supplier_phone,
-        s.address AS supplier_address,
-        s.city AS supplier_city,
-        s.note AS supplier_note,
-        st.id AS store_id,
-        st.name AS store_name,
-        c.id AS company_id,
-        c.name AS company_name,
-        u.id AS user_id,
-        u.username AS user_username,
-        u.first_name AS user_first_name,
-        u.last_name AS user_last_name,
-        u.email AS user_email,
-        u.phone_number AS user_phone,
-        u.role AS user_role,
-        u.status AS user_status,
-        u.picture AS user_picture
+        p.id, p.reference_no, p.timestamp, p.grand_total, p.discount_string, p.shipping,
+        s.id AS supplier_id, s.name AS supplier_name, s.company AS supplier_company, s.email AS supplier_email,
+        s.phone_number AS supplier_phone, s.address AS supplier_address, s.city AS supplier_city, s.note AS supplier_note,
+        st.id AS store_id, st.name AS store_name,
+        c.id AS company_id, c.name AS company_name,
+        u.id AS user_id, u.username AS user_username, u.first_name AS user_first_name,
+        u.last_name AS user_last_name, u.email AS user_email, u.phone_number AS user_phone,
+        u.role AS user_role, u.status AS user_status, u.picture AS user_picture
       FROM purchases p
       LEFT JOIN suppliers s ON s.id = p.supplier_id
       LEFT JOIN stores st ON st.id = p.store_id
@@ -114,29 +100,21 @@ exports.searchPurchases = async (filters, user) => {
     }
 
     const [orders] = await db.query(
-      `
-      SELECT o.*, o.orderable_id AS purchase_id,
-             pr.name AS product_name,
-             pr.code AS product_code,
-             pr.unit AS product_unit,
-             pr.cost AS product_cost,
-             pr.price AS product_price,
-             pr.alert_quantity AS product_alert_quantity
-      FROM orders o
-      LEFT JOIN products pr ON pr.id = o.product_id
-      WHERE o.orderable_type = 'App\\\\Models\\\\Purchase'
-        AND o.orderable_id IN (${purchaseIds.map(() => "?").join(",")})
-    `,
+      `SELECT o.*, o.orderable_id AS purchase_id, pr.name AS product_name, pr.code AS product_code,
+              pr.unit AS product_unit, pr.cost AS product_cost, pr.price AS product_price,
+              pr.alert_quantity AS product_alert_quantity
+       FROM orders o
+       LEFT JOIN products pr ON pr.id = o.product_id
+       WHERE o.orderable_type = 'App\\Models\\Purchase'
+         AND o.orderable_id IN (${purchaseIds.map(() => "?").join(",")})`,
       purchaseIds
     );
 
     const [payments] = await db.query(
-      `
-      SELECT *, paymentable_id AS purchase_id
-      FROM payments
-      WHERE paymentable_type = 'App\\\\Models\\\\Purchase'
-        AND paymentable_id IN (${purchaseIds.map(() => "?").join(",")})
-    `,
+      `SELECT *, paymentable_id AS purchase_id
+       FROM payments
+       WHERE paymentable_type = 'App\\Models\\Purchase'
+         AND paymentable_id IN (${purchaseIds.map(() => "?").join(",")})`,
       purchaseIds
     );
 
@@ -144,24 +122,20 @@ exports.searchPurchases = async (filters, user) => {
 
     const [paymentImages] = paymentIds.length
       ? await db.query(
-          `
-      SELECT *, imageable_id AS payment_id,
-             CONCAT('http://your-domain.com/storage', path) AS src,
-             'image' AS type
-      FROM images
-      WHERE imageable_type = 'App\\\\Models\\\\Payment'
-        AND imageable_id IN (${paymentIds.map(() => "?").join(",")})
-      `,
+          `SELECT *, imageable_id AS payment_id,
+                  CONCAT('http://your-domain.com/storage', path) AS src,
+                  'image' AS type
+           FROM images
+           WHERE imageable_type = 'App\\Models\\Payment'
+             AND imageable_id IN (${paymentIds.map(() => "?").join(",")})`,
           paymentIds
         )
       : [[]];
 
     const [preturns] = await db.query(
-      `
-      SELECT *, purchase_id
-      FROM preturns
-      WHERE purchase_id IN (${purchaseIds.map(() => "?").join(",")})
-    `,
+      `SELECT *, purchase_id
+       FROM preturns
+       WHERE purchase_id IN (${purchaseIds.map(() => "?").join(",")})`,
       purchaseIds
     );
 
@@ -169,27 +143,23 @@ exports.searchPurchases = async (filters, user) => {
 
     const [preturnImages] = preturnIds.length
       ? await db.query(
-          `
-      SELECT *, imageable_id AS preturn_id,
-             CONCAT('http://your-domain.com/storage', path) AS src,
-             'image' AS type
-      FROM images
-      WHERE imageable_type = 'App\\\\Models\\\\Preturn'
-        AND imageable_id IN (${preturnIds.map(() => "?").join(",")})
-      `,
+          `SELECT *, imageable_id AS preturn_id,
+                  CONCAT('http://your-domain.com/storage', path) AS src,
+                  'image' AS type
+           FROM images
+           WHERE imageable_type = 'App\\Models\\Preturn'
+             AND imageable_id IN (${preturnIds.map(() => "?").join(",")})`,
           preturnIds
         )
       : [[]];
 
     const [purchaseImages] = await db.query(
-      `
-      SELECT *, imageable_id AS purchase_id,
-             CONCAT('http://your-domain.com/storage', path) AS src,
-             'image' AS type
-      FROM images
-      WHERE imageable_type = 'App\\\\Models\\\\Purchase'
-        AND imageable_id IN (${purchaseIds.map(() => "?").join(",")})
-    `,
+      `SELECT *, imageable_id AS purchase_id,
+              CONCAT('http://your-domain.com/storage', path) AS src,
+              'image' AS type
+       FROM images
+       WHERE imageable_type = 'App\\Models\\Purchase'
+         AND imageable_id IN (${purchaseIds.map(() => "?").join(",")})`,
       purchaseIds
     );
 
