@@ -100,20 +100,26 @@ exports.searchPurchases = async (filters, user) => {
     }
 
     const [orders] = await db.query(
-      `SELECT o.*, o.orderable_id AS purchase_id, pr.name AS product_name, pr.code AS product_code,
-              pr.unit AS product_unit, pr.cost AS product_cost, pr.price AS product_price,
-              pr.alert_quantity AS product_alert_quantity
-       FROM orders o
-       LEFT JOIN products pr ON pr.id = o.product_id
-       WHERE o.orderable_type = 'App\\Models\\Purchase'
-         AND o.orderable_id IN (${purchaseIds.map(() => "?").join(",")})`,
+      `
+        SELECT o.*, o.orderable_id AS purchase_id,
+          pr.name AS product_name,
+          pr.code AS product_code,
+          pr.unit AS product_unit,
+          pr.cost AS product_cost,
+          pr.price AS product_price,
+          pr.alert_quantity AS product_alert_quantity
+        FROM orders o
+        LEFT JOIN products pr ON pr.id = o.product_id
+        WHERE o.orderable_type = 'App\\\\Models\\\\Purchase'
+          AND o.orderable_id IN (${purchaseIds.map(() => "?").join(",")})
+      `,
       purchaseIds
     );
 
     const [payments] = await db.query(
       `SELECT *, paymentable_id AS purchase_id
        FROM payments
-       WHERE paymentable_type = 'App\\Models\\Purchase'
+       WHERE paymentable_type = 'App\\\\Models\\\\Purchase'
          AND paymentable_id IN (${purchaseIds.map(() => "?").join(",")})`,
       purchaseIds
     );
@@ -122,11 +128,9 @@ exports.searchPurchases = async (filters, user) => {
 
     const [paymentImages] = paymentIds.length
       ? await db.query(
-          `SELECT *, imageable_id AS payment_id,
-                  CONCAT('http://your-domain.com/storage', path) AS src,
-                  'image' AS type
+          `SELECT *, imageable_id AS payment_id
            FROM images
-           WHERE imageable_type = 'App\\Models\\Payment'
+           WHERE imageable_type = 'App\\\\Models\\\\Payment'
              AND imageable_id IN (${paymentIds.map(() => "?").join(",")})`,
           paymentIds
         )
@@ -143,22 +147,18 @@ exports.searchPurchases = async (filters, user) => {
 
     const [preturnImages] = preturnIds.length
       ? await db.query(
-          `SELECT *, imageable_id AS preturn_id,
-                  CONCAT('http://your-domain.com/storage', path) AS src,
-                  'image' AS type
+          `SELECT *, imageable_id AS preturn_id
            FROM images
-           WHERE imageable_type = 'App\\Models\\Preturn'
+           WHERE imageable_type = 'App\\\\Models\\\\Preturn'
              AND imageable_id IN (${preturnIds.map(() => "?").join(",")})`,
           preturnIds
         )
       : [[]];
 
     const [purchaseImages] = await db.query(
-      `SELECT *, imageable_id AS purchase_id,
-              CONCAT('http://your-domain.com/storage', path) AS src,
-              'image' AS type
+      `SELECT *, imageable_id AS purchase_id
        FROM images
-       WHERE imageable_type = 'App\\Models\\Purchase'
+       WHERE imageable_type = 'App\\\\Models\\\\Purchase'
          AND imageable_id IN (${purchaseIds.map(() => "?").join(",")})`,
       purchaseIds
     );
