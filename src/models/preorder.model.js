@@ -187,31 +187,33 @@ exports.searchPurchaseOrders = async (req) => {
       return map;
     }, {});
 
-    const enrichedPurchaseOrders = purchaseOrderRows.map((po) => ({
-      ...po,
-      attachments: orderImagesMap[po.id] || [],
-      supplier: {
-        id: po.supplier_id,
-        name: po.supplier_name,
-        email: po.supplier_email,
-        company_id: po.company_id,
-        company_name: po.supplier_company,
-        company: {
-          id: po.company_id,
-          name: po.company_name,
+    const enrichedPurchaseOrders = purchaseOrderRows.map((po) => {
+      return {
+        ...po,
+        attachments: orderImagesMap[po.id] || [],
+        supplier: {
+          id: po.supplier_id,
+          name: po.supplier_name,
+          email: po.supplier_email,
+          company_id: po.company_id,
+          company_name: po.supplier_company,
+          company: {
+            id: po.company_id,
+            name: po.company_name,
+          },
         },
-      },
-      received_amount: purchaseMap[po.id] || "0",
-      orders: (orderItemsMap[po.id] || []).map((item) => ({
-        ...item,
-        category: {
-          id: item.category_id,
-          name: item.category_name,
-        },
-        images: itemImagesMap[item.id] || [],
-        received_quantity: itemReceivedMap[item.id] || "0",
-      })),
-    }));
+        received_amount: purchaseMap[po.id] || "0",
+        orders: (orderItemsMap[po.id] || []).map((item) => ({
+          ...item,
+          category: {
+            id: item.category_id,
+            name: item.category_name,
+          },
+          images: itemImagesMap[item.id] || [],
+          received_quantity: itemReceivedMap[item.id] || "0",
+        })),
+      };
+    });
 
     const totalPages = Math.ceil(total / perPage);
 
@@ -672,10 +674,11 @@ exports.delete = async (req) => {
       `SELECT role FROM users WHERE id = ?`,
       [req.user?.id]
     );
+
     if (userCheck[0]?.role === "secretary") {
       return {
         status: "error",
-        message: "Not allowed",
+        message: "not_allowed_on_your_role",
         code: 403,
       };
     }

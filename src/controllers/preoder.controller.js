@@ -30,6 +30,13 @@ exports.updatePreOrder = async (req, res) => {
 exports.deletePreOrder = async (req, res) => {
   try {
     const preOrder = await PreOrder.delete(req);
+
+    if (preOrder.status === "error") {
+      res.status(500).json({ error: preOrder.message });
+
+      return;
+    }
+
     res.json(preOrder);
   } catch (err) {
     res.status(500).json({ error: "Server Error" });
