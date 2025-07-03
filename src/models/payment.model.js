@@ -586,8 +586,8 @@ exports.search = async (req) => {
       type === "purchase"
         ? "App\\Models\\Purchase"
         : type === "sale"
-        ? "App\\Models\\Sale"
-        : null;
+          ? "App\\Models\\Sale"
+          : null;
 
     if (!paymentableType) {
       throw new Error("Invalid type: must be either 'purchase' or 'sale'");

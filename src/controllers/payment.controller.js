@@ -63,7 +63,7 @@ exports.concurrentPaymentCreate = async (req, res) => {
   try {
     const paymentId = await Payment.concurrentPaymentCreate(req);
 
-    res.json(paymentId);
+    res.status(200).json(paymentId);
   } catch (error) {
     res.status(500).json({ error: "Server Error" });
   }
