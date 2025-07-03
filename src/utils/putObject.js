@@ -12,19 +12,19 @@ exports.putObject = async (file, fileName) => {
 
     if (metadata.format === "jpeg" || metadata.format === "jpg") {
       optimizedBuffer = await image
-        .resize({ width: 800, withoutEnlargement: true })
+        .resize({ width: 1200, withoutEnlargement: true })
         .jpeg({ quality: 80 })
         .toBuffer();
       contentType = "image/jpeg";
     } else if (metadata.format === "png") {
       optimizedBuffer = await image
-        .resize({ width: 800, withoutEnlargement: true })
+        .resize({ width: 1200, withoutEnlargement: true })
         .png({ compressionLevel: 9 })
         .toBuffer();
       contentType = "image/png";
     } else if (metadata.format === "webp") {
       optimizedBuffer = await image
-        .resize({ width: 800, withoutEnlargement: true })
+        .resize({ width: 1200, withoutEnlargement: true })
         .webp({ quality: 80 })
         .toBuffer();
       contentType = "image/webp";
