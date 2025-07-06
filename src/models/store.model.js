@@ -149,7 +149,7 @@ exports.searchStores = async (req) => {
 
 exports.getStores = async (req) => {
   try {
-    const query = `
+    let query = `
       SELECT
         s.id AS store_id,
         s.name AS store_name,
@@ -163,10 +163,15 @@ exports.getStores = async (req) => {
       LEFT JOIN companies c ON c.id = s.company_id
     `;
 
-    // run query
-    const [rows] = await db.query(query);
+    const params = [];
 
-    // map to JS objects
+    if (req.user.role !== "admin") {
+      query += " WHERE s.id = ?";
+      params.push(req.user?.first_store_id);
+    }
+
+    const [rows] = await db.query(query, params);
+
     const stores = rows.map((r) => ({
       id: r.store_id,
       name: r.store_name,
@@ -180,7 +185,6 @@ exports.getStores = async (req) => {
       },
     }));
 
-    // mirror your sendResponse shape
     return {
       status: "Success",
       data: stores,
