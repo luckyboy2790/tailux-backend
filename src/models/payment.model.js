@@ -15,7 +15,7 @@ exports.searchPending = async (req) => {
       page = 1,
       per_page = 10,
       company_id = "",
-      reference_no = "",
+      keyword = "",
       startDate = "",
       sort_by_date = "desc",
       endDate = "",
@@ -140,11 +140,11 @@ exports.searchPending = async (req) => {
       }
     }
 
-    if (reference_no) {
+    if (keyword) {
       query += ` AND p.reference_no LIKE ?`;
       countQuery += ` AND p.reference_no LIKE ?`;
-      params.push(`%${reference_no}%`);
-      countParams.push(`%${reference_no}%`);
+      params.push(`%${keyword}%`);
+      countParams.push(`%${keyword}%`);
     }
 
     if (startDate && endDate) {
