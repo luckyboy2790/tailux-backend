@@ -1288,7 +1288,7 @@ exports.getPurchasesReport = async (req) => {
 
       return {
         ...p,
-        total_amount: p.grand_total,
+        total_amount: p.grand_total - returned,
         paid_amount: paid,
         returned_amount: returned,
         company: {
