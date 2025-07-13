@@ -63,7 +63,7 @@ exports.searchPurchases = async (filters, user) => {
 
     const purchaseQuery = `
       SELECT
-        p.id, p.reference_no, p.timestamp, p.grand_total, p.discount_string, p.shipping, p.status,
+        p.id, p.reference_no, p.timestamp, p.grand_total, p.discount_string, p.shipping, p.status, p.created_at,
         s.id AS supplier_id, s.name AS supplier_name, s.company AS supplier_company, s.email AS supplier_email,
         s.phone_number AS supplier_phone, s.address AS supplier_address, s.city AS supplier_city, s.note AS supplier_note,
         st.id AS store_id, st.name AS store_name,
