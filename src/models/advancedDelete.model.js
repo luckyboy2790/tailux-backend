@@ -90,46 +90,20 @@ exports.submitAdvancedDelete = async (req) => {
     const purchaseIds = purchases.map((p) => p.id);
     if (!purchaseIds.length) return { success: true };
 
-    const [payments] = await db.query(
-      `
-      SELECT paymentable_id AS purchase_id, amount
-      FROM payments
-      WHERE paymentable_type = 'App\\\\Models\\\\Purchase'
-        AND status = 1
-        AND paymentable_id IN (${purchaseIds.map(() => "?").join(",")})
-    `,
-      purchaseIds
-    );
-
-    const groupSum = (rows, key) => {
-      const result = {};
-      for (const row of rows) {
-        if (!result[row[key]]) result[row[key]] = 0;
-        result[row[key]] += parseFloat(row.amount || 0);
-      }
-      return result;
-    };
-
-    const paymentMap = groupSum(payments, "purchase_id");
-
     for (const purchase of purchases) {
-      const paid = paymentMap[purchase.id.toString()] || 0;
-
-      if (purchase.grand_total === paid) {
-        await db.query(
-          "DELETE FROM orders WHERE orderable_id = ? AND orderable_type = 'App\\\\Models\\\\Purchase'",
-          [purchase.id]
-        );
-        await db.query(
-          "DELETE FROM payments WHERE paymentable_id = ? AND paymentable_type = 'App\\\\Models\\\\Purchase'",
-          [purchase.id]
-        );
-        await db.query(
-          "DELETE FROM images WHERE imageable_id = ? AND imageable_type = 'App\\\\Models\\\\Purchase'",
-          [purchase.id]
-        );
-        await db.query("DELETE FROM purchases WHERE id = ?", [purchase.id]);
-      } else continue;
+      await db.query(
+        "DELETE FROM orders WHERE orderable_id = ? AND orderable_type = 'App\\\\Models\\\\Purchase'",
+        [purchase.id]
+      );
+      await db.query(
+        "DELETE FROM payments WHERE paymentable_id = ? AND paymentable_type = 'App\\\\Models\\\\Purchase'",
+        [purchase.id]
+      );
+      await db.query(
+        "DELETE FROM images WHERE imageable_id = ? AND imageable_type = 'App\\\\Models\\\\Purchase'",
+        [purchase.id]
+      );
+      await db.query("DELETE FROM purchases WHERE id = ?", [purchase.id]);
     }
 
     return { success: true };
