@@ -538,21 +538,6 @@ exports.create = async (req) => {
           "App\\Models\\Sale",
         ]
       );
-
-      const [storeProductRows] = await db.query(
-        "SELECT id, quantity FROM store_products WHERE store_id = ? AND product_id = ?",
-        [store, item.product]
-      );
-
-      if (
-        storeProductRows.length > 0 &&
-        storeProductRows[0].quantity >= item.quantity
-      ) {
-        await db.query(
-          "UPDATE store_products SET quantity = quantity - ? WHERE id = ?",
-          [item.quantity, storeProductRows[0].id]
-        );
-      }
     }
 
     return {
@@ -730,46 +715,11 @@ exports.update = async (req) => {
             "App\\Models\\Sale",
           ]
         );
-
-        const [[storeProduct]] = await db.query(
-          `SELECT id FROM store_products WHERE store_id = ? AND product_id = ?`,
-          [store_id, item.product]
-        );
-
-        if (storeProduct) {
-          await db.query(
-            `UPDATE store_products SET quantity = quantity - ? WHERE id = ?`,
-            [item.quantity, storeProduct.id]
-          );
-        } else {
-          throw new Error(
-            `Product (ID: ${item.product}) not available in this store`
-          );
-        }
       } else {
-        const [[oldOrder]] = await db.query(
-          `SELECT quantity FROM orders WHERE id = ?`,
-          [item.id]
-        );
-
         await db.query(
           `UPDATE orders SET product_id = ?, price = ?, quantity = ?, subtotal = ?, updated_at = NOW() WHERE id = ?`,
           [item.product, item.price, item.quantity, subtotal, item.id]
         );
-
-        if (oldOrder.quantity !== item.quantity) {
-          const [[storeProduct]] = await db.query(
-            `SELECT id FROM store_products WHERE store_id = ? AND product_id = ?`,
-            [store_id, item.product]
-          );
-
-          if (storeProduct) {
-            await db.query(
-              `UPDATE store_products SET quantity = quantity + ? - ? WHERE id = ?`,
-              [oldOrder.quantity, item.quantity, storeProduct.id]
-            );
-          }
-        }
       }
     }
 
