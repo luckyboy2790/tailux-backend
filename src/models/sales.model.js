@@ -1013,3 +1013,74 @@ exports.allSales = async (req) => {
     };
   }
 };
+
+exports.approve = async (req) => {
+  try {
+    const user = req.user;
+    const id = req.params.id || req.body.id;
+
+    if (!user || !user.id) {
+      throw new Error("Unauthorized: User not authenticated");
+    }
+
+    const allowed = ["user", "admin"];
+    if (!allowed.includes(user.role)) {
+      return {
+        status: "error",
+        message: "You are not allowed to access this page",
+        code: 403,
+      };
+    }
+
+    const [saleRows] = await db.query(
+      `SELECT * FROM sales WHERE id = ? LIMIT 1`,
+      [id]
+    );
+
+    if (saleRows.length === 0) {
+      return {
+        status: "error",
+        message: "Sale not found",
+        code: 404,
+      };
+    }
+
+    const sale = saleRows[0];
+
+    await db.query(`UPDATE sales SET status = 1 WHERE id = ?`, [id]);
+
+    const [supplierRows] = await db.query(
+      `SELECT company FROM suppliers WHERE id = ? LIMIT 1`,
+      [sale.supplier_id]
+    );
+
+    const supplierCompany = supplierRows[0]?.company || "";
+
+    await db.query(
+      `INSERT INTO notifications (user_id, company_id, reference_no, message, supplier, amount, notifiable_id, notifiable_type, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        user.id,
+        sale.company_id,
+        sale.reference_no,
+        "sale_approved",
+        supplierCompany,
+        sale.grand_total,
+        sale.id,
+        "App\\Models\\Sale",
+      ]
+    );
+
+    return {
+      status: "success",
+      sale_id: sale.id,
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      status: "error",
+      message: error.message,
+      code: 500,
+    };
+  }
+};

@@ -59,3 +59,12 @@ exports.totalSales = async (req, res) => {
   }
 };
 
+exports.approveSale = async (req, res) => {
+  try {
+    const sale = await Sales.approve(req);
+
+    res.json(sale);
+  } catch (error) {
+    res.status(500).json({ error: "Server Error" });
+  }
+};

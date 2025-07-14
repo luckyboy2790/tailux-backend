@@ -9,5 +9,6 @@ router.post("/create", verifyToken, salesController.createSale);
 router.post("/update", verifyToken, salesController.updateSale);
 router.post("/delete/:id", salesController.deleteSale);
 router.get("/get_all", verifyToken, salesController.totalSales);
+router.post("/approve/:id", verifyToken, salesController.approveSale);
 
 module.exports = router;
