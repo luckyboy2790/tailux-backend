@@ -1541,10 +1541,9 @@ exports.approve = async (req) => {
     const supplierCompany = supplierRows[0]?.company || "";
 
     await db.query(
-      `INSERT INTO notifications (user_id, company_id, reference_no, message, supplier, amount, notifiable_id, notifiable_type, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      `INSERT INTO notifications (company_id, reference_no, message, supplier, amount, notifiable_id, notifiable_type, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
-        user.id,
         purchase.company_id,
         purchase.reference_no,
         "purchase_approved",
