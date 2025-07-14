@@ -745,7 +745,7 @@ exports.create = async (req) => {
         `INSERT INTO orders (product_id, cost, quantity, expiry_date, subtotal, orderable_id, orderable_type, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
         [
-          item.product_id,
+          item.product,
           item.cost,
           item.quantity,
           item.expiry_date || null,
@@ -757,7 +757,7 @@ exports.create = async (req) => {
 
       const [storeProductRows] = await db.query(
         `SELECT id, quantity FROM store_products WHERE store_id = ? AND product_id = ?`,
-        [store, item.product_id]
+        [store, item.product]
       );
 
       if (storeProductRows.length > 0) {
@@ -769,7 +769,7 @@ exports.create = async (req) => {
         await db.query(
           `INSERT INTO store_products (store_id, product_id, quantity, created_at, updated_at)
            VALUES (?, ?, ?, NOW(), NOW())`,
-          [store, item.product_id, item.quantity]
+          [store, item.product, item.quantity]
         );
       }
     }
@@ -998,7 +998,7 @@ exports.update = async (req) => {
         await db.query(
           `INSERT INTO orders (product_id, cost, quantity, expiry_date, subtotal, orderable_id, orderable_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
           [
-            item.product_id,
+            item.product,
             item.cost,
             item.quantity,
             item.expiry_date || null,
@@ -1010,7 +1010,7 @@ exports.update = async (req) => {
 
         const [[stock]] = await db.query(
           `SELECT id FROM store_products WHERE store_id = ? AND product_id = ?`,
-          [store, item.product_id]
+          [store, item.product]
         );
 
         if (stock) {
@@ -1021,7 +1021,7 @@ exports.update = async (req) => {
         } else {
           await db.query(
             `INSERT INTO store_products (store_id, product_id, quantity, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())`,
-            [store, item.product_id, item.quantity]
+            [store, item.product, item.quantity]
           );
         }
       } else {
@@ -1032,7 +1032,7 @@ exports.update = async (req) => {
         await db.query(
           `UPDATE orders SET product_id = ?, cost = ?, quantity = ?, expiry_date = ?, subtotal = ?, updated_at = NOW() WHERE id = ?`,
           [
-            item.product_id,
+            item.product,
             item.cost,
             item.quantity,
             item.expiry_date,
@@ -1044,7 +1044,7 @@ exports.update = async (req) => {
         if (oldOrder.quantity !== item.quantity) {
           const [[storeProduct]] = await db.query(
             `SELECT id FROM store_products WHERE store_id = ? AND product_id = ?`,
-            [store, item.product_id]
+            [store, item.product]
           );
 
           if (storeProduct) {

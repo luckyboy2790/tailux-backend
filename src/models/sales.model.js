@@ -460,8 +460,6 @@ exports.create = async (req) => {
     const user_id = req.user?.id || 1;
     const user_role = req.user?.role || "user";
 
-    console.log(user_id);
-
     const [storeData] = await db.query(
       "SELECT id, company_id FROM stores WHERE id = ?",
       [store]
@@ -532,7 +530,7 @@ exports.create = async (req) => {
         `INSERT INTO orders (product_id, price, quantity, subtotal, orderable_id, orderable_type, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
         [
-          item.product_id,
+          item.product,
           item.price,
           item.quantity,
           subtotal,
@@ -543,7 +541,7 @@ exports.create = async (req) => {
 
       const [storeProductRows] = await db.query(
         "SELECT id, quantity FROM store_products WHERE store_id = ? AND product_id = ?",
-        [store, item.product_id]
+        [store, item.product]
       );
 
       if (
@@ -724,7 +722,7 @@ exports.update = async (req) => {
         await db.query(
           `INSERT INTO orders (product_id, price, quantity, subtotal, orderable_id, orderable_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
           [
-            item.product_id,
+            item.product,
             item.price,
             item.quantity,
             subtotal,
@@ -735,7 +733,7 @@ exports.update = async (req) => {
 
         const [[storeProduct]] = await db.query(
           `SELECT id FROM store_products WHERE store_id = ? AND product_id = ?`,
-          [store_id, item.product_id]
+          [store_id, item.product]
         );
 
         if (storeProduct) {
@@ -745,7 +743,7 @@ exports.update = async (req) => {
           );
         } else {
           throw new Error(
-            `Product (ID: ${item.product_id}) not available in this store`
+            `Product (ID: ${item.product}) not available in this store`
           );
         }
       } else {
@@ -756,13 +754,13 @@ exports.update = async (req) => {
 
         await db.query(
           `UPDATE orders SET product_id = ?, price = ?, quantity = ?, subtotal = ?, updated_at = NOW() WHERE id = ?`,
-          [item.product_id, item.price, item.quantity, subtotal, item.id]
+          [item.product, item.price, item.quantity, subtotal, item.id]
         );
 
         if (oldOrder.quantity !== item.quantity) {
           const [[storeProduct]] = await db.query(
             `SELECT id FROM store_products WHERE store_id = ? AND product_id = ?`,
-            [store_id, item.product_id]
+            [store_id, item.product]
           );
 
           if (storeProduct) {
